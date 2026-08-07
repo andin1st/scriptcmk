@@ -1,0 +1,22 @@
+# docker-compose-checkmk-v2.yml
+# Checkmk Community Edition (Raw) v2.5.0
+version: '3.8'
+
+services:
+  checkmk:
+    image: checkmk/check-mk-raw:2.5.0-latest
+    container_name: checkmk-server
+    restart: always
+    ports:
+      - "8080:5000"  # Web GUI (http://localhost:8080/monitoring)
+      - "8000:8000"  # Agent Controller (TLS registration)
+    environment:
+      - CMK_PASSWORD=GantiDenganPasswordAman123!
+      - CMK_SITE_ID=monitoring
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - checkmk-data:/opt/omd/sites
+
+volumes:
+  checkmk-data:
+    driver: local
