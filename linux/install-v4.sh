@@ -10,7 +10,7 @@ set -e
 
 # --- Default Variables ---
 DEFAULT_SITE="monitoring"
-DEFAULT_GITHUB="username/checkmk-agent-deploy"
+DEFAULT_GITHUB="andin1st/scriptcmk"
 DEFAULT_VERSION="2.5.0p9-1"  # Default ke versi stabil 2.5 yang Anda miliki
 GITHUB_REPO=""
 SERVER_IP=""
@@ -29,8 +29,7 @@ show_help() {
     echo ""
     echo "Pilihan:"
     echo "  -s, --server IP/HOST     IP Address atau Hostname server Checkmk (Wajib)"
-    echo "  -d, --site SITE_ID       Site ID Checkmk (Default: $DEFAULT_SITE)"
-    echo "  -v, --version VERSION    Versi spesifik agen Checkmk (Default: $DEFAULT_VERSION)"
+    echo "  -d, --site SITE_ID       Site ID Checkmk (Default: $Default: $DEFAULT_VERSION)"
     echo "  -g, --github REPO        Repositori GitHub kustom (Format: 'user/repo')"
     echo "  -h, --help               Menampilkan bantuan ini"
     echo ""
