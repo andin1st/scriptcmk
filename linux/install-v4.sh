@@ -12,7 +12,7 @@ set -e
 DEFAULT_SITE="monitoring"
 DEFAULT_GITHUB="andin1st/scriptcmk"
 DEFAULT_VERSION="2.5.0p9-1"  # Default ke versi stabil 2.5 yang Anda miliki
-GITHUB_REPO=""
+GITHUB_REPO="andin1st/scriptcmk"
 SERVER_IP=""
 SITE_ID=""
 AGENT_VERSION=""
