@@ -143,7 +143,7 @@ chmod 755 "${LOCAL_CHECKS_DIR}"
 
 # Download Local Checks from GitHub
 echo -e "\e[32m[INFO] Mengunduh script local checks kustom dari GitHub...\e[0m"
-SCRIPTS=("cpu_os_info.sh" "ram_health.sh" "disk_nvme_health.sh" "remote_apps.sh" "battery_health.sh")
+SCRIPTS=("cpu_info.sh" "OS_info.sh" "ram_health.sh" "disk_nvme_health.sh" "remote_apps.sh" "battery_health.sh")
 
 for script in "${SCRIPTS[@]}"; do
     SCRIPT_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/linux/local_checks/${script}"
