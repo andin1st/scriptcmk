@@ -151,7 +151,7 @@ echo -e "\e[1;34m[3/5] Mengunduh script pemantauan kustom (Local Checks) dari Gi
 LOCAL_DIR="/usr/lib/check_mk_agent/local"
 mkdir -p "$LOCAL_DIR"
 
-SCRIPTS=("cpu_os_info.sh" "ram_health.sh" "disk_nvme_health.sh" "remote_apps.sh")
+SCRIPTS=("cpu_os_info.sh" "ram_health.sh" "disk_nvme_health.sh" "remote_apps.sh" "battery_health.sh")
 
 for script in "${SCRIPTS[@]}"; do
     SCRIPT_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/linux/local_checks/${script}"
