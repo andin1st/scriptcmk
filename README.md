@@ -1,121 +1,84 @@
-# Blueprint Deployment & Monitoring Checkmk (Community Edition 2.5)
+# Panduan Deployment Agen Checkmk Otomatis (GitHub Bootstrap) - v3
 
-Repositori ini berisi infrastruktur monitoring otomatis menggunakan **Checkmk Community Edition 2.5** di atas **Docker (Ubuntu 26)** dan otomatisasi deployment agen client untuk **Linux (Ubuntu/Debian)** dan **Windows** via GitHub Bootstrap.
-
----
-
-## 🏗️ Arsitektur Proyek
-
-1. **Server Monitoring (Self-Hosted)**:
-   - **OS**: Linux Ubuntu 26
-   - **Platform**: Docker & Docker Compose
-   - **Image**: `checkmk/check-mk-raw:2.5.0-latest` (Community Edition)
-   - **Port Utama**: Web GUI (`8080`), TLS Registration Agent (`8000`)
-
-2. **Client Agen (Deployment Otomatis)**:
-   - **Metode**: One-Liner Bootstrap Script (Instalasi 1 baris perintah).
-   - **Mekanisme**: Mengunduh installer langsung dari server Checkmk lokal secara aman, menginstal paket agen, memasang semua dependensi lokal, mendaftarkan tugas asinkron, dan menyalin semua script _local checks_ dari GitHub.
+Repositon ini berisi skrip otomatisasi untuk memasang, mengonfigurasi, dan memperbarui agen pemantauan **Checkmk 2.5 (Community Edition)** beserta skrip pemantau kustom (_local checks_) pada sistem operasi **Linux (Debian/Ubuntu & Fedora/RHEL)** dan **Windows Client**.
 
 ---
 
-## 📁 Struktur Repositori GitHub
+## Arsitektur & Alur Kerja
+
+1. **GitHub sebagai Pusat Kode**: Semua installer bootstrap dan skrip _local checks_ kustom disimpan di repositori Git organisasi Anda.
+2. **Bootstrap Satu Baris (One-Liner)**: Tim IT mengeksekusi satu baris perintah di komputer client. Skrip akan mendeteksi tipe OS, menginstal paket dependensi, mengunduh installer agen Checkmk langsung dari server lokal Anda, mendaftarkan penjadwal tes RAM, dan menarik skrip pemantau dari GitHub.
+3. **Pemantauan Asinkron**: Tugas berat seperti pengujian perangkat keras RAM (`memtester`) dijadwalkan berjalan secara asinkron setiap 2 minggu sekali agar tidak mengganggu performa kerja harian pengguna.
+
+---
+
+## Struktur Direktori Repositori
 
 ```text
-checkmk-agent-deploy/
-├── README.md                 # Panduan tim IT (Dokumen ini)
-├── .gitignore                # File filter Git untuk keamanan data
-├── docker-compose.yml         # Konfigurasi container Checkmk CE 2.5 di Server
+├── .gitignore
+├── README.md
 ├── linux/
-│   ├── install-v5.sh         # Script installer otomatis Linux (Input Dinamis)
-│   └── local_checks/         # Script pemantauan kustom Linux
-│       ├── cpu_os_info.sh     # Detail OS, Spesifikasi CPU & Suhu
-│       ├── ram_health.sh      # RAM Health (Membaca hasil memtester)
-│       ├── disk_nvme_health.sh# Kesehatan drive SATA HDD & NVMe SSD
-│       ├── remote_apps.sh     # Deteksi ID AnyDesk & RustDesk
-│       └── battery_health.sh  # Deteksi baterai Laptop vs PC (Baru!)
+│   ├── install-v6.sh           # Skrip Installer Otomatis Linux (Debian & RPM)
+│   └── local_checks/
+│       ├── cpu_os_info.sh      # Metrik OS, Detail CPU, & Suhu
+│       ├── ram_health.sh       # Pembaca Log Tes RAM Memtester (Asinkron)
+│       ├── disk_nvme_health.sh # Analisis Kesehatan Storage HDD & NVMe (smartctl)
+│       ├── remote_apps.sh      # Detektor ID AnyDesk & RustDesk
+│       └── battery_health.sh   # Detektor Baterai Akurat (UPower dengan fallback Sysfs)
 └── windows/
-    ├── install.ps1           # Script installer otomatis Windows (PowerShell)
-    └── local_checks/         # Script pemantauan kustom Windows
-        ├── os_cpu_health.ps1  # Detail OS, Lisensi Windows & Suhu CPU
-        ├── ram_health.ps1     # RAM Health (Membaca log Windows Memory)
-        ├── disk_nvme_health.ps1 # Kesehatan Disk & SSD NVMe (Wearout, TBW)
-        ├── remote_apps.ps1    # Deteksi ID AnyDesk & RustDesk Windows
-        └── ms_office_status.ps1 # Versi & Status Lisensi MS Office (ospp.vbs)
+    ├── install.ps1             # Skrip Installer Otomatis Windows (PowerShell)
+    └── local_checks/
+        ├── os_cpu_health.ps1
+        ├── ram_health.ps1
+        ├── disk_nvme_health.ps1
+        ├── remote_apps.ps1
+        └── ms_office_status.ps1
 ```
 
 ---
 
-## 🚀 Panduan Deployment Cepat (Tim IT)
+## Panduan Deployment Client
 
-### 1. Sisi Server (Ubuntu 26)
+### 1. Client Linux (Debian/Ubuntu & Fedora/RHEL/Rocky/Alma)
 
-Masuk ke server monitoring Anda, buat direktori, dan jalankan Docker Compose:
+Skrip installer **`install-v6.sh`** secara otomatis mendeteksi distribusi Linux Anda, menginstal manajer paket yang cocok (`apt-get` atau `dnf`/`yum`), menginstal dependensi (termasuk `upower` untuk pelacakan baterai presisi), dan mengunduh format agen yang sesuai (`.deb` atau `.rpm`).
+
+#### **Opsi A: Jalankan Secara Interaktif (Sangat Ramah Pengguna)**
+
+Jalankan perintah ini di terminal client, skrip akan meminta input IP Server, Site ID, dan Versi Agen secara aman langsung dari keyboard (`/dev/tty`):
 
 ```bash
-mkdir -p ~/checkmk && cd ~/checkmk
-# Buat docker-compose.yml lalu jalankan:
-docker compose up -d
+curl -sSL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install-v6.sh | sudo bash
 ```
 
-Akses dashboard di `http://<IP_SERVER_UBUNTU>:8080/monitoring` dengan user `cmkadmin`.
+#### **Opsi B: Jalankan Secara Instan (Sangat Cocok untuk Massal / SSH)**
 
-### 2. Sisi Client Linux (Ubuntu/Debian)
+Gunakan parameter CLI untuk mengotomatiskan seluruh alur tanpa interaksi layar sama sekali:
 
-Pilih salah satu metode instalasi di bawah ini pada komputer client:
+```bash
+curl -sSL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install-v6.sh | sudo bash -s -- -s <IP_SERVER_CHECKMK> -d <SITE_ID> -v 2.5.0p9-1
+```
 
-- **Metode A: Interaktif (Dipandu Tanya Jawab)**
+_Argumen yang Tersedia:_
 
-  ```bash
-  curl -sSL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install-v5.sh | sudo bash
-  ```
+- `-s, --server`: IP atau Hostname server Checkmk (Wajib pada mode instan).
+- `-d, --site`: Site ID instansi Checkmk (Default: `cmk`).
+- `-v, --version`: Versi spesifik agen Checkmk di server Anda (Default: `2.5.0p9-1`).
+- `-g, --github`: Nama repositori kustom Anda (Format: `andin1st/scriptcmk`).
 
-  _Script akan otomatis meminta Anda memasukkan IP Server, Site ID, dan Versi Agen secara interaktif melalui `/dev/tty`._
+---
 
-- **Metode B: Otomatis (Instan tanpa interaksi - Cocok untuk SSH Massal)**
-  ```bash
-  curl -sSL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install-v5.sh | sudo bash -s -- -s <IP_SERVER> -d <SITE_ID> -v 2.5.0p9-1
-  ```
+### 2. Client Windows
 
-### 3. Sisi Client Windows
-
-Buka PowerShell sebagai Administrator pada client Windows dan jalankan:
+Eksekusi perintah berikut di dalam terminal **PowerShell (Run as Administrator)**:
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/andin1st/scriptcmk/main/windows/install.ps1'))
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/username/checkmk-agent-deploy/main/windows/install.ps1'))
 ```
 
 ---
 
-## 📊 Detail Pembaruan Logika Pemantauan (Penting!)
+## Logika Pemantauan Khas (Highlight)
 
-### A. Kesehatan RAM (`ram_health.sh`) - Sistem Pengujian Asinkron
-
-Guna menghindari beban berat saat polling berkala, pengujian RAM dialihkan secara asinkron menggunakan Cron Job / Task Scheduler yang dijalankan setiap 2 minggu sekali:
-
-- **Runner Script (`run_memtester.sh`)**: Berjalan otomatis, menghitung kapasitas **20% dari Free RAM** saat itu secara dinamis, lalu menulis parameter `SAMPLE_SIZE: <nilai>M` ke dalam `/var/log/checkmk_custom/memtester_health.log` sebelum memicu _memtester_.
-- **Local Check (`ram_health.sh`)**: Membaca log tersebut, melakukan parsing besaran sampel (misal mengonversi `2048M` -> `2GB`), lalu melaporkannya ke Checkmk dengan format output presisi:
-  ```text
-  Status Memory: Ok, tidak ditemukan error saat pengecekan | Sample Pengujian : 2GB | <timestamp>
-  ```
-
-### B. Kesehatan Baterai (`battery_health.sh`) - Deteksi Otomatis Laptop vs PC
-
-Script ini sekarang memiliki kecerdasan deteksi hardware (_autodetect_):
-
-- **Jika Laptop**: Membaca sirkuit `/sys/class/power_supply/`, mengonversi mikro-Wh ke Wh, menghitung persentase keausan (_battery health status_), dan mengembalikan data:
-  ```text
-  Status Battery : Charging/Discharging | Design Capacity : 40w/h | Current Capacity : 20w/h | Health : 50% | Battery Level : 100%
-  ```
-- **Jika PC/Desktop**: Secara cerdas mendeteksi ketiadaan baterai dan melaporkan status normal:
-  ```text
-  Device is PC/Desktop, there is no battery.
-  ```
-
----
-
-## 🔧 Pemeliharaan & Modifikasi Script
-
-Jika Anda ingin menambahkan metrik baru atau mengubah fungsionalitas:
-
-1. Simpan script pemantauan baru Anda ke dalam folder `linux/local_checks/` atau `windows/local_checks/`.
-2. Buka file installer (`install-v5.sh` atau `install.ps1`), lalu tambahkan nama file script baru tersebut pada variabel **Array** (`SCRIPTS` di Linux atau `$Scripts` di Windows) agar ikut terunduh secara otomatis pada client baru berikutnya.
+- **Deteksi Kesehatan Baterai (`battery_health.sh`)**: Menggunakan `upower` sebagai pembaca data D-Bus baterai utama yang sangat akurat. Jika dijalankan di server CLI minimal / PC Desktop biasa, skrip otomatis melakukan deteksi dan _fallback_ tanpa memicu error.
+- **Pengujian RAM Asinkron (`ram_health.sh`)**: Berjalan dua minggu sekali via Cron/Task Scheduler, mengalokasikan **20% dari Free RAM** (`SAMPLE_SIZE`) untuk diuji kesehatannya, lalu menulis log statis agar bisa dibaca kapan saja oleh agen Checkmk secara instan.
