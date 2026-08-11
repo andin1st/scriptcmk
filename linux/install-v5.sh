@@ -149,7 +149,7 @@ LOCAL_DIR="/usr/lib/check_mk_agent/local"
 mkdir -p "$LOCAL_DIR"
 
 # Daftar script local checks yang akan diunduh dari GitHub
-SCRIPTS=("cpu_os_info.sh" "ram_health.sh" "disk_nvme_health.sh" "remote_apps.sh")
+SCRIPTS=("cpu_os_info.sh" "ram_health.sh" "disk_nvme_health.sh" "remote_apps.sh" "battery_health.sh")
 
 for script in "${SCRIPTS[@]}"; do
     echo -e "  - Mengunduh script: $script"
