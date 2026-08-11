@@ -28,9 +28,9 @@ fi
 
 # 2. Inisialisasi Nilai Default Parameter
 SERVER_IP=""
-SITE_ID="monitoring"
+SITE_ID="cmk"
 AGENT_VERSION="2.5.0p9-1"
-GITHUB_REPO="username/checkmk-agent-deploy"
+GITHUB_REPO="andin1st/scriptcmk"
 
 # Fungsi Menampilkan Bantuan Penggunaan
 show_help() {
