@@ -1,159 +1,246 @@
 #!/usr/bin/env bash
-# ==========================================
-# S.M.A.R.T Monitoring for Linux (Checkmk)
-# Windows Parity Version (Predictive Analytics)
-# ==========================================
+# ==============================================================================
+# Local Check Checkmk: Storage Health (Unified NVMe & SATA SSD/HDD - v2)
+# ==============================================================================
 
-# 1. CEK KETERSEDIAAN SMARTMONTOOLS
-if ! command -v smartctl &> /dev/null; then
-    echo "1 \"SMART_Status\" - WARNING: smartmontools tidak terinstal."
+# Ensure smartctl is installed
+if ! command -v smartctl >/dev/null 2>&1; then
+    echo "3 \"Storage_Health\" - Error: smartctl is not installed on this system."
     exit 0
 fi
 
-# 2. DETEKSI DISK FISIK (Abaikan Loop, RAM disk, CD-ROM)
-DISKS=$(lsblk -d -n -o NAME,TYPE | awk '$2=="disk" && $1 !~ /^(loop|ram|sr|fd)/ {print $1}')
-
-if [ -z "$DISKS" ]; then
-    echo "3 \"SMART_Status\" - UNKNOWN: Tidak dapat mendeteksi Physical Disk."
-    exit 0
-fi
-
-# 3. ANALISA SETIAP DISK
-for disk in $DISKS; do
-    dev="/dev/$disk"
-    serviceName="SMART_Disk_${disk}"
-
-    # Kapasitas Disk (GB)
-    bytes=$(lsblk -b -d -n -o SIZE "$dev" 2>/dev/null)
-    if [ -n "$bytes" ]; then
-        capacityGB=$(awk "BEGIN {printf \"%.2f\", $bytes / 1073741824}")
-    else
-        capacityGB="UNKNOWN"
-    fi
-
-    cmdOutput=$(smartctl -a "$dev" 2>&1)
-
-    # Filter USB atau non-SMART
-    if echo "$cmdOutput" | grep -qi "Unknown USB bridge" || lsblk -d -n -o TRAN "$dev" | grep -qi "usb"; then
-        continue
-    fi
-
-    if echo "$cmdOutput" | grep -Eqi "SMART support is: Disabled|SMART support is: Unavailable"; then
-        model=$(echo "$cmdOutput" | grep -iE "^Device Model:|^Model Number:|^Model Name:" | head -n 1 | awk -F':' '{print $2}' | xargs)
-        echo "0 \"$serviceName\" - OK - Model: ${model:-$disk} | SMART dinonaktifkan."
-        continue
-    fi
-
-    # ---- DETEKSI KELULUSAN ----
-    exitCode=3
-    stateText="UNKNOWN"
-    details=""
-
-    if echo "$cmdOutput" | grep -iq "PASSED"; then
-        exitCode=0; stateText="OK"; details="Status: PASSED"
-    elif echo "$cmdOutput" | grep -iq "FAILED"; then
-        exitCode=2; stateText="CRITICAL"; details="Status: FAILED (Kerusakan Hardware)"
-    fi
-
-    # Ekstrak Model
-    model=$(echo "$cmdOutput" | grep -iE "^Device Model:|^Model Number:|^Model Name:" | head -n 1 | awk -F':' '{print $2}' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-    [ -z "$model" ] && model="$disk"
-
-    # ---- EKSTRAK SUHU ----
-    temp="N/A"
-    if echo "$cmdOutput" | grep -qE "Temperature:[[:space:]]+[0-9]+[[:space:]]+Celsius"; then
-        temp=$(echo "$cmdOutput" | grep -E "Temperature:[[:space:]]+[0-9]+[[:space:]]+Celsius" | awk '{print $2}')
-    elif echo "$cmdOutput" | grep -qE "^194 Temperature_Celsius"; then
-        temp=$(echo "$cmdOutput" | awk '/^194 Temperature_Celsius/ {print $10}')
-    elif echo "$cmdOutput" | grep -qE "Current Drive Temperature:"; then
-        temp=$(echo "$cmdOutput" | grep "Current Drive Temperature:" | awk '{print $4}')
-    fi
-
-    # ---- EKSTRAK KESEHATAN (LIFETIME) ----
-    healthPct="N/A"
-    pctUsed=-1
-    if echo "$cmdOutput" | grep -qE "Percentage Used:"; then
-        pctUsed=$(echo "$cmdOutput" | grep "Percentage Used:" | awk '{print $3}' | tr -d '%')
-        healthPct=$((100 - pctUsed))
-    elif echo "$cmdOutput" | grep -qE "Available Spare:"; then
-        healthPct=$(echo "$cmdOutput" | grep "Available Spare:" | awk '{print $3}' | tr -d '%')
-    fi
-
-    # ---- EKSTRAK TOTAL READ / WRITE / POWER ON HOURS ----
-    totalRead="N/A"
-    totalWrite="N/A"
-    writeGB=0
-    powerOnHours=0
-
-    # Menangkap pola "Data Units Read: 1234 [14.9 TB]"
-    if read_line=$(echo "$cmdOutput" | grep -i "Data Units Read:"); then
-        totalRead=$(echo "$read_line" | awk -F'[][]' '{print $2}')
+# Function to parse a single disk
+parse_disk() {
+    local dev=$1
+    local name=$(basename "$dev")
+    
+    # Run smartctl once and save output to scratch
+    local tmp_out="/tmp/smartctl_${name}.out"
+    smartctl -a "$dev" > "$tmp_out" 2>/dev/null
+    local exit_status=$?
+    
+    # If smartctl fails completely to read the device
+    if [ ! -s "$tmp_out" ]; then
+        echo "3 \"Storage_Health_${name}\" - Error: Failed to query smartctl on $dev."
+        return
     fi
     
-    if write_line=$(echo "$cmdOutput" | grep -i "Data Units Written:"); then
-        totalWrite=$(echo "$write_line" | awk -F'[][]' '{print $2}')
-        # Konversi ke GB untuk kalkulasi matematika
-        if echo "$totalWrite" | grep -iq "TB"; then
-            val=$(echo "$totalWrite" | awk '{print $1}')
-            writeGB=$(awk "BEGIN {print $val * 1024}")
-        elif echo "$totalWrite" | grep -iq "GB"; then
-            writeGB=$(echo "$totalWrite" | awk '{print $1}')
+    # Detect if NVMe or SATA
+    local is_nvme=false
+    if grep -q "Model Number:" "$tmp_out" || grep -q "Percentage Used:" "$tmp_out"; then
+        is_nvme=true
+    fi
+    
+    # 1. Model & Size
+    local model=""
+    local bytes_size=""
+    local formatted_size=""
+    
+    if [ "$is_nvme" = true ]; then
+        model=$(grep "Model Number:" "$tmp_out" | cut -d':' -f2- | xargs)
+        bytes_size=$(grep "User Capacity:" "$tmp_out" | grep -o -E '[0-9,]+ bytes' | tr -d ',' | awk '{print $1}')
+    else
+        model=$(grep "Device Model:" "$tmp_out" | cut -d':' -f2- | xargs)
+        bytes_size=$(grep "User Capacity:" "$tmp_out" | grep -o -E '[0-9,]+ bytes' | tr -d ',' | awk '{print $1}')
+        # Fallback if Device Model not found (some HDDs use Model Family or Vendor)
+        if [ -z "$model" ]; then
+            model=$(grep "Model Family:" "$tmp_out" | cut -d':' -f2- | xargs)
+        fi
+        if [ -z "$model" ]; then
+            model=$(grep "Vendor:" "$tmp_out" | cut -d':' -f2- | xargs)
         fi
     fi
-
-    if echo "$cmdOutput" | grep -qE "Power On Hours:"; then
-        powerOnHours=$(echo "$cmdOutput" | grep "Power On Hours:" | awk '{print $4}' | tr -d ',')
-    elif echo "$cmdOutput" | grep -qE "^[[:space:]]*9 Power_On_Hours"; then
-        powerOnHours=$(echo "$cmdOutput" | awk '/^[[:space:]]*9 Power_On_Hours/ {print $10}')
+    
+    [ -z "$model" ] && model="Unknown Model"
+    
+    # Format size (GB / TB)
+    if [ -n "$bytes_size" ]; then
+        formatted_size=$(awk "BEGIN {printf \"%.2f GB\", $bytes_size / 1073741824}")
+        
+        # Deduce display capacity (e.g. 1TB, 512GB)
+        local gb_rounded=$(awk "BEGIN {print int(($bytes_size / 1000000000) + 0.5)}")
+        if [ "$gb_rounded" -ge 1000 ]; then
+            local tb_val=$(awk "BEGIN {printf \"%.0f\", $gb_rounded / 1000}")
+            display_capacity="${tb_val}TB"
+        else
+            display_capacity="${gb_rounded}GB"
+        fi
+    else
+        formatted_size="Unknown Size"
+        display_capacity=""
     fi
-
-    # ---- KALKULASI ESTIMASI UMUR (PREDICTIVE ANALYTICS) ----
-    analyticText=""
-    if [ "$pctUsed" -gt 0 ] && [ $(awk "BEGIN {print ($writeGB > 0) ? 1 : 0}") -eq 1 ] && [ "$powerOnHours" -gt 0 ]; then
-        # Menggunakan AWK untuk perhitungan desimal (floating point)
-        analyticText=$(awk -v writeGB="$writeGB" -v pctUsed="$pctUsed" -v poh="$powerOnHours" '
-        BEGIN {
-            totalTBW_GB = writeGB / (pctUsed / 100);
-            daysOn = poh / 24;
-            dailyWriteGB = writeGB / daysOn;
-            remainingGB = totalTBW_GB - writeGB;
-            remainingDays = (dailyWriteGB > 0) ? (remainingGB / dailyWriteGB) : 999999;
-            remainingYears = remainingDays / 365;
-            printf " | Write/Day: %.2f GB | Est. Life: %.2f Years", dailyWriteGB, remainingYears;
-        }')
-    elif [ "$pctUsed" -eq 0 ] && [ $(awk "BEGIN {print ($writeGB > 0) ? 1 : 0}") -eq 1 ]; then
-        analyticText=" | Write/Day: N/A | Est. Life: >10 Years (Keausan masih 0%)"
+    
+    # Deduplicate capacity in model name
+    local display_model="$model"
+    if [ -n "$display_capacity" ]; then
+        if [[ "${model,,}" != *"${display_capacity,,}"* ]]; then
+            display_model="$model $display_capacity"
+        fi
     fi
-
-    # ==========================================
-    # 4. SUSUN GRAFIK & OUTPUT CHECKMK
-    # ==========================================
-    perfMetrics=""
-    infoText="Model: $model ($capacityGB GB) | $details"
-
-    if [ "$temp" != "N/A" ]; then
-        perfMetrics="${perfMetrics}temp=$temp;55;65;0;100|"
-        infoText="$infoText | Temp: ${temp}C"
-        if [ "$temp" -ge 55 ] && [ "$exitCode" -eq 0 ]; then exitCode=1; stateText="WARNING"; fi
-        if [ "$temp" -ge 65 ]; then exitCode=2; stateText="CRITICAL"; fi
+    
+    # 2. SMART Status
+    local smart_status=$(grep "SMART overall-health self-assessment test result:" "$tmp_out" | cut -d':' -f2- | xargs)
+    # Fallback for some SATA SMART structures
+    if [ -z "$smart_status" ]; then
+        smart_status=$(grep "SMART Health Status:" "$tmp_out" | cut -d':' -f2- | xargs)
     fi
-
-    if [ "$healthPct" != "N/A" ]; then
-        perfMetrics="${perfMetrics}health=$healthPct;20;10;0;100|"
-        infoText="$infoText | Health: ${healthPct}%"
-        if [ "$healthPct" -le 20 ] && [ "$exitCode" -eq 0 ]; then exitCode=1; stateText="WARNING"; fi
-        if [ "$healthPct" -le 10 ]; then exitCode=2; stateText="CRITICAL"; fi
+    [ -z "$smart_status" ] && smart_status="PASSED" # Fallback default
+    
+    # 3. Core parameters: Temp, Health, Read, Written, Hours
+    local temp="0"
+    local health="100"
+    local read_tb="0.0"
+    local written_tb="0.0"
+    local hours=0
+    local is_ssd=true
+    
+    # Check if HDD (has non-zero rotation rate)
+    if grep -i -q "Rotation Rate" "$tmp_out"; then
+        if ! grep -i -q "Solid State Device" "$tmp_out"; then
+            is_ssd=false
+        fi
     fi
-
-    if [ "$totalRead" != "N/A" ] && [ "$totalWrite" != "N/A" ]; then
-        infoText="$infoText | Read: $totalRead | Written: $totalWrite"
+    
+    if [ "$is_nvme" = true ]; then
+        # Temperature
+        temp=$(grep "Temperature:" "$tmp_out" | grep -o -E '[0-9]+' | head -n1)
+        
+        # Health (100 - Percentage Used)
+        local used=$(grep "Percentage Used:" "$tmp_out" | grep -o -E '[0-9]+' | head -n1)
+        if [ -n "$used" ]; then
+            health=$((100 - used))
+        fi
+        
+        # Reads and Writes
+        local read_bracket=$(grep "Data Units Read:" "$tmp_out" | grep -o -E '\[.*\]' | tr -d '[]')
+        local write_bracket=$(grep "Data Units Written:" "$tmp_out" | grep -o -E '\[.*\]' | tr -d '[]')
+        
+        if [ -n "$read_bracket" ]; then
+            read_tb=$(echo "$read_bracket" | awk '{print $1}')
+        fi
+        if [ -n "$write_bracket" ]; then
+            written_tb=$(echo "$write_bracket" | awk '{print $1}')
+        fi
+        
+        # Power On Hours
+        hours=$(grep "Power On Hours:" "$tmp_out" | tr -d ',' | grep -o -E '[0-9]+' | head -n1)
+        
+    else
+        # SATA SSD/HDD parsing
+        # Temperature: check ID 194 or 190
+        temp=$(awk '$1 == 194 || $1 == 190 {print $10}' "$tmp_out" | head -n1 | grep -o -E '[0-9]+' | head -n1)
+        [ -z "$temp" ] && temp="0"
+        
+        # Power On Hours: ID 9
+        hours=$(awk '$1 == 9 {print $10}' "$tmp_out" | head -n1 | tr -d ',' | grep -o -E '[0-9]+' | head -n1)
+        
+        if [ "$is_ssd" = true ]; then
+            # Health: check ID 231 (SSD Life Left), 233 (Media Wearout Indicator), or 202
+            health=$(awk '$1 == 231 || $1 == 233 || $1 == 202 {print $10}' "$tmp_out" | head -n1 | grep -o -E '[0-9]+' | head -n1)
+            [ -z "$health" ] && health="100"
+            
+            # Written/Read: check ID 241 and 242 (usually in LBAs, 1 LBA = 512 bytes)
+            local raw_written_lba=$(awk '$1 == 241 {print $10}' "$tmp_out" | head -n1 | tr -d ',' | grep -o -E '[0-9]+' | head -n1)
+            local raw_read_lba=$(awk '$1 == 242 {print $10}' "$tmp_out" | head -n1 | tr -d ',' | grep -o -E '[0-9]+' | head -n1)
+            
+            if [ -n "$raw_written_lba" ]; then
+                written_tb=$(awk "BEGIN {printf \"%.1f\", ($raw_written_lba * 512) / 1000000000000}")
+            fi
+            if [ -n "$raw_read_lba" ]; then
+                read_tb=$(awk "BEGIN {printf \"%.1f\", ($raw_read_lba * 512) / 1000000000000}")
+            fi
+        else
+            health="N/A"
+            read_tb="N/A"
+            written_tb="N/A"
+        fi
     fi
+    
+    [ -z "$hours" ] && hours=0
+    [ -z "$temp" ] && temp="0"
+    
+    # 4. Write/Day (Total Written in GB / Days)
+    local write_day="0.00"
+    if [ "$is_ssd" = true ] && [ "$hours" -gt 0 ] && [ "$written_tb" != "N/A" ]; then
+        local days=$(awk "BEGIN {print $hours / 24}")
+        local written_gb=$(awk "BEGIN {print $written_tb * 1000}")
+        write_day=$(awk "BEGIN {printf \"%.2f\", $written_gb / $days}")
+    else
+        write_day="N/A"
+    fi
+    
+    # 5. Est. Life (Years)
+    local est_life=">10"
+    if [ "$is_ssd" = true ] && [ "$health" != "N/A" ]; then
+        local used_pct=$((100 - health))
+        if [ "$used_pct" -gt 0 ] && [ "$hours" -gt 0 ]; then
+            local years_active=$(awk "BEGIN {print $hours / 8760}")
+            local est_val=$(awk "BEGIN {printf \"%.2f\", $years_active * (100 - $used_pct) / $used_pct}")
+            est_life="${est_val} Years"
+        else
+            est_life=">10 Years"
+        fi
+    else
+        est_life="N/A"
+    fi
+    
+    # Format health display
+    local health_display="N/A"
+    if [ "$health" != "N/A" ]; then
+        health_display="${health}%"
+    fi
+    
+    # Format Read/Write display
+    local read_display="N/A"
+    local write_display="N/A"
+    if [ "$read_tb" != "N/A" ]; then read_display="${read_tb} TB"; fi
+    if [ "$written_tb" != "N/A" ]; then write_display="${written_tb} TB"; fi
+    
+    # Format Write/Day display
+    local write_day_display="N/A"
+    if [ "$write_day" != "N/A" ]; then write_day_display="${write_day} GB"; fi
+    
+    # 6. Checkmk Status Evaluation
+    local status="OK"
+    local checkmk_status=0
+    
+    # If SMART overall health is failed
+    if [[ "$smart_status" != "PASSED" && "$smart_status" != "passed" && "$smart_status" != "OK" && "$smart_status" != "ok" ]]; then
+        status="CRITICAL"
+        checkmk_status=2
+    fi
+    
+    # Check SSD health threshold
+    if [ "$health" != "N/A" ] && [ "$checkmk_status" -eq 0 ]; then
+        if [ "$health" -le 80 ]; then
+            status="CRITICAL"
+            checkmk_status=2
+        elif [ "$health" -le 90 ]; then
+            status="WARNING"
+            checkmk_status=1
+        fi
+    fi
+    
+    # Clean up temp file
+    rm -f "$tmp_out"
+    
+    # Final clean output format requested:
+    # Status : OK | Model: V-GEN01SM21AR1024ITNVME 1TB (953.87 GB) ❘ Status: PASSED ❘ Temp: 45C ❘ Health: 92% ❘ Read: 27.5 TB ❘ Written: 39.3 TB ❘ Write/Day: 153.55 GB ❘ Est. Life: 8.26 Years
+    echo "$checkmk_status \"Storage_Health_${name}\" Status : $status | Model: $display_model ($formatted_size) ❘ Status: $smart_status ❘ Temp: ${temp}C ❘ Health: ${health_display} ❘ Read: ${read_display} ❘ Written: ${write_display} ❘ Write/Day: ${write_day_display} ❘ Est. Life: ${est_life}"
+}
 
-    infoText="$infoText$analyticText"
+# Scan devices
+# NVMe drives
+for dev in /dev/nvme[0-9]; do
+    if [ -b "$dev" ] || [ -c "$dev" ]; then
+        parse_disk "$dev"
+    fi
+done
 
-    # Hapus karakter pipa (|) di akhir metrik jika ada
-    perfMetrics=${perfMetrics%|}
-    [ -z "$perfMetrics" ] && perfMetrics="-"
-
-    echo "$exitCode \"$serviceName\" $perfMetrics $stateText - $infoText"
+# SATA drives (sda to sdz)
+for dev in /dev/sd[a-z]; do
+    if [ -b "$dev" ]; then
+        # Exclude partitions (only read the main drive)
+        parse_disk "$dev"
+    fi
 done

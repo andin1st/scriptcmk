@@ -125,4 +125,4 @@ elif [ "$temp_int" -gt 65 ] && [ "$fan_speed" -lt 1000 ]; then
 fi
 
 # 4. Output dalam format kustom yang Anda minta
-echo "$status \"FAN_Health\" - Status : $status_txt | FAN Speed : ${fan_speed}rpm | Remark: $remark"
+echo "$status \"FAN Processor\" - Status : $status_txt | CPU Temp : ${temp_int}C | FAN Speed : ${fan_speed}rpm | Remark: $remark"

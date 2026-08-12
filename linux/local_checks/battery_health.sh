@@ -93,4 +93,4 @@ if [ "$health" -ne 0 ] 2>/dev/null; then
 fi
 
 # 4. Output dalam format kustom yang Anda minta
-echo "$status \"Battery_Health\" - Status Battery : $BAT_STATUS | Design Capacity : ${design_wh}w/h | Current Capacity : ${current_wh}w/h | Health : ${health}% | Battery Level : ${BAT_LEVEL}%"
+echo "$status \"Battery Health\" - Status Battery : $BAT_STATUS | Design Capacity : ${design_wh}w/h | Current Capacity : ${current_wh}w/h | Health : ${health}% | Battery Level : ${BAT_LEVEL}%"
