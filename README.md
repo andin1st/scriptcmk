@@ -1,4 +1,4 @@
-# Panduan Deployment Agen Checkmk Otomatis (GitHub Bootstrap) - v3
+# Panduan Deployment Agen Checkmk Otomatis (GitHub Bootstrap)
 
 Repositon ini berisi skrip otomatisasi untuk memasang, mengonfigurasi, dan memperbarui agen pemantauan **Checkmk 2.5 (Community Edition)** beserta skrip pemantau kustom (_local checks_) pada sistem operasi **Linux (Debian/Ubuntu & Fedora/RHEL)** dan **Windows Client**.
 
@@ -6,7 +6,7 @@ Repositon ini berisi skrip otomatisasi untuk memasang, mengonfigurasi, dan mempe
 
 ## Arsitektur & Alur Kerja
 
-1. **GitHub sebagai Pusat Kode**: Semua installer bootstrap dan skrip _local checks_ kustom disimpan di repositori Git organisasi Anda.
+1. **GitHub sebagai Pusat Kode**: Semua installer bootstrap dan skrip _local checks_ kustom disimpan di repositori Git.
 2. **Bootstrap Satu Baris (One-Liner)**: Tim IT mengeksekusi satu baris perintah di komputer client. Skrip akan mendeteksi tipe OS, menginstal paket dependensi, mengunduh installer agen Checkmk langsung dari server lokal Anda, mendaftarkan penjadwal tes RAM, dan menarik skrip pemantau dari GitHub.
 3. **Pemantauan Asinkron**: Tugas berat seperti pengujian perangkat keras RAM (`memtester`) dijadwalkan berjalan secara asinkron setiap 2 minggu sekali agar tidak mengganggu performa kerja harian pengguna.
 
@@ -73,7 +73,7 @@ _Argumen yang Tersedia:_
 Eksekusi perintah berikut di dalam terminal **PowerShell (Run as Administrator)**:
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/username/checkmk-agent-deploy/main/windows/install.ps1'))
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/andin1st/scriptcmk/main/windows/install.ps1'))
 ```
 
 ---
