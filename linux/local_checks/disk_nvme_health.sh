@@ -1,246 +1,236 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # ==============================================================================
-# Local Check Checkmk: Storage Health (Unified NVMe & SATA SSD/HDD - v2)
+# Local Check Checkmk: Storage Health (SATA & NVMe Unified) - v4
 # ==============================================================================
+import os
+import re
+import subprocess
+import sys
 
-# Ensure smartctl is installed
-if ! command -v smartctl >/dev/null 2>&1; then
-    echo "3 \"Storage_Health\" - Error: smartctl is not installed on this system."
-    exit 0
-fi
+def check_smartctl():
+    # Check if smartctl is installed
+    try:
+        subprocess.run(["smartctl", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except FileNotFoundError:
+        return False
 
-# Function to parse a single disk
-parse_disk() {
-    local dev=$1
-    local name=$(basename "$dev")
-    
-    # Run smartctl once and save output to scratch
-    local tmp_out="/tmp/smartctl_${name}.out"
-    smartctl -a "$dev" > "$tmp_out" 2>/dev/null
-    local exit_status=$?
-    
-    # If smartctl fails completely to read the device
-    if [ ! -s "$tmp_out" ]; then
-        echo "3 \"Storage_Health_${name}\" - Error: Failed to query smartctl on $dev."
-        return
-    fi
-    
-    # Detect if NVMe or SATA
-    local is_nvme=false
-    if grep -q "Model Number:" "$tmp_out" || grep -q "Percentage Used:" "$tmp_out"; then
-        is_nvme=true
-    fi
-    
-    # 1. Model & Size
-    local model=""
-    local bytes_size=""
-    local formatted_size=""
-    
-    if [ "$is_nvme" = true ]; then
-        model=$(grep "Model Number:" "$tmp_out" | cut -d':' -f2- | xargs)
-        bytes_size=$(grep "User Capacity:" "$tmp_out" | grep -o -E '[0-9,]+ bytes' | tr -d ',' | awk '{print $1}')
-    else
-        model=$(grep "Device Model:" "$tmp_out" | cut -d':' -f2- | xargs)
-        bytes_size=$(grep "User Capacity:" "$tmp_out" | grep -o -E '[0-9,]+ bytes' | tr -d ',' | awk '{print $1}')
-        # Fallback if Device Model not found (some HDDs use Model Family or Vendor)
-        if [ -z "$model" ]; then
-            model=$(grep "Model Family:" "$tmp_out" | cut -d':' -f2- | xargs)
-        fi
-        if [ -z "$model" ]; then
-            model=$(grep "Vendor:" "$tmp_out" | cut -d':' -f2- | xargs)
-        fi
-    fi
-    
-    [ -z "$model" ] && model="Unknown Model"
-    
-    # Format size (GB / TB)
-    if [ -n "$bytes_size" ]; then
-        formatted_size=$(awk "BEGIN {printf \"%.2f GB\", $bytes_size / 1073741824}")
-        
-        # Deduce display capacity (e.g. 1TB, 512GB)
-        local gb_rounded=$(awk "BEGIN {print int(($bytes_size / 1000000000) + 0.5)}")
-        if [ "$gb_rounded" -ge 1000 ]; then
-            local tb_val=$(awk "BEGIN {printf \"%.0f\", $gb_rounded / 1000}")
-            display_capacity="${tb_val}TB"
-        else
-            display_capacity="${gb_rounded}GB"
-        fi
-    else
-        formatted_size="Unknown Size"
-        display_capacity=""
-    fi
-    
-    # Deduplicate capacity in model name
-    local display_model="$model"
-    if [ -n "$display_capacity" ]; then
-        if [[ "${model,,}" != *"${display_capacity,,}"* ]]; then
-            display_model="$model $display_capacity"
-        fi
-    fi
-    
-    # 2. SMART Status
-    local smart_status=$(grep "SMART overall-health self-assessment test result:" "$tmp_out" | cut -d':' -f2- | xargs)
-    # Fallback for some SATA SMART structures
-    if [ -z "$smart_status" ]; then
-        smart_status=$(grep "SMART Health Status:" "$tmp_out" | cut -d':' -f2- | xargs)
-    fi
-    [ -z "$smart_status" ] && smart_status="PASSED" # Fallback default
-    
-    # 3. Core parameters: Temp, Health, Read, Written, Hours
-    local temp="0"
-    local health="100"
-    local read_tb="0.0"
-    local written_tb="0.0"
-    local hours=0
-    local is_ssd=true
-    
-    # Check if HDD (has non-zero rotation rate)
-    if grep -i -q "Rotation Rate" "$tmp_out"; then
-        if ! grep -i -q "Solid State Device" "$tmp_out"; then
-            is_ssd=false
-        fi
-    fi
-    
-    if [ "$is_nvme" = true ]; then
-        # Temperature
-        temp=$(grep "Temperature:" "$tmp_out" | grep -o -E '[0-9]+' | head -n1)
-        
-        # Health (100 - Percentage Used)
-        local used=$(grep "Percentage Used:" "$tmp_out" | grep -o -E '[0-9]+' | head -n1)
-        if [ -n "$used" ]; then
-            health=$((100 - used))
-        fi
-        
-        # Reads and Writes
-        local read_bracket=$(grep "Data Units Read:" "$tmp_out" | grep -o -E '\[.*\]' | tr -d '[]')
-        local write_bracket=$(grep "Data Units Written:" "$tmp_out" | grep -o -E '\[.*\]' | tr -d '[]')
-        
-        if [ -n "$read_bracket" ]; then
-            read_tb=$(echo "$read_bracket" | awk '{print $1}')
-        fi
-        if [ -n "$write_bracket" ]; then
-            written_tb=$(echo "$write_bracket" | awk '{print $1}')
-        fi
-        
-        # Power On Hours
-        hours=$(grep "Power On Hours:" "$tmp_out" | tr -d ',' | grep -o -E '[0-9]+' | head -n1)
-        
-    else
-        # SATA SSD/HDD parsing
-        # Temperature: check ID 194 or 190
-        temp=$(awk '$1 == 194 || $1 == 190 {print $10}' "$tmp_out" | head -n1 | grep -o -E '[0-9]+' | head -n1)
-        [ -z "$temp" ] && temp="0"
-        
-        # Power On Hours: ID 9
-        hours=$(awk '$1 == 9 {print $10}' "$tmp_out" | head -n1 | tr -d ',' | grep -o -E '[0-9]+' | head -n1)
-        
-        if [ "$is_ssd" = true ]; then
-            # Health: check ID 231 (SSD Life Left), 233 (Media Wearout Indicator), or 202
-            health=$(awk '$1 == 231 || $1 == 233 || $1 == 202 {print $10}' "$tmp_out" | head -n1 | grep -o -E '[0-9]+' | head -n1)
-            [ -z "$health" ] && health="100"
-            
-            # Written/Read: check ID 241 and 242 (usually in LBAs, 1 LBA = 512 bytes)
-            local raw_written_lba=$(awk '$1 == 241 {print $10}' "$tmp_out" | head -n1 | tr -d ',' | grep -o -E '[0-9]+' | head -n1)
-            local raw_read_lba=$(awk '$1 == 242 {print $10}' "$tmp_out" | head -n1 | tr -d ',' | grep -o -E '[0-9]+' | head -n1)
-            
-            if [ -n "$raw_written_lba" ]; then
-                written_tb=$(awk "BEGIN {printf \"%.1f\", ($raw_written_lba * 512) / 1000000000000}")
-            fi
-            if [ -n "$raw_read_lba" ]; then
-                read_tb=$(awk "BEGIN {printf \"%.1f\", ($raw_read_lba * 512) / 1000000000000}")
-            fi
-        else
-            health="N/A"
-            read_tb="N/A"
-            written_tb="N/A"
-        fi
-    fi
-    
-    [ -z "$hours" ] && hours=0
-    [ -z "$temp" ] && temp="0"
-    
-    # 4. Write/Day (Total Written in GB / Days)
-    local write_day="0.00"
-    if [ "$is_ssd" = true ] && [ "$hours" -gt 0 ] && [ "$written_tb" != "N/A" ]; then
-        local days=$(awk "BEGIN {print $hours / 24}")
-        local written_gb=$(awk "BEGIN {print $written_tb * 1000}")
-        write_day=$(awk "BEGIN {printf \"%.2f\", $written_gb / $days}")
-    else
-        write_day="N/A"
-    fi
-    
-    # 5. Est. Life (Years)
-    local est_life=">10"
-    if [ "$is_ssd" = true ] && [ "$health" != "N/A" ]; then
-        local used_pct=$((100 - health))
-        if [ "$used_pct" -gt 0 ] && [ "$hours" -gt 0 ]; then
-            local years_active=$(awk "BEGIN {print $hours / 8760}")
-            local est_val=$(awk "BEGIN {printf \"%.2f\", $years_active * (100 - $used_pct) / $used_pct}")
-            est_life="${est_val} Years"
-        else
-            est_life=">10 Years"
-        fi
-    else
-        est_life="N/A"
-    fi
-    
-    # Format health display
-    local health_display="N/A"
-    if [ "$health" != "N/A" ]; then
-        health_display="${health}%"
-    fi
-    
-    # Format Read/Write display
-    local read_display="N/A"
-    local write_display="N/A"
-    if [ "$read_tb" != "N/A" ]; then read_display="${read_tb} TB"; fi
-    if [ "$written_tb" != "N/A" ]; then write_display="${written_tb} TB"; fi
-    
-    # Format Write/Day display
-    local write_day_display="N/A"
-    if [ "$write_day" != "N/A" ]; then write_day_display="${write_day} GB"; fi
-    
-    # 6. Checkmk Status Evaluation
-    local status="OK"
-    local checkmk_status=0
-    
-    # If SMART overall health is failed
-    if [[ "$smart_status" != "PASSED" && "$smart_status" != "passed" && "$smart_status" != "OK" && "$smart_status" != "ok" ]]; then
-        status="CRITICAL"
-        checkmk_status=2
-    fi
-    
-    # Check SSD health threshold
-    if [ "$health" != "N/A" ] && [ "$checkmk_status" -eq 0 ]; then
-        if [ "$health" -le 80 ]; then
-            status="CRITICAL"
-            checkmk_status=2
-        elif [ "$health" -le 90 ]; then
-            status="WARNING"
-            checkmk_status=1
-        fi
-    fi
-    
-    # Clean up temp file
-    rm -f "$tmp_out"
-    
-    # Final clean output format requested:
-    # Status : OK | Model: V-GEN01SM21AR1024ITNVME 1TB (953.87 GB) ❘ Status: PASSED ❘ Temp: 45C ❘ Health: 92% ❘ Read: 27.5 TB ❘ Written: 39.3 TB ❘ Write/Day: 153.55 GB ❘ Est. Life: 8.26 Years
-    echo "$checkmk_status \"Storage_Health_${name}\" Status : $status | Model: $display_model ($formatted_size) ❘ Status: $smart_status ❘ Temp: ${temp}C ❘ Health: ${health_display} ❘ Read: ${read_display} ❘ Written: ${write_display} ❘ Write/Day: ${write_day_display} ❘ Est. Life: ${est_life}"
-}
+def get_storage_devices():
+    devices = []
+    try:
+        # Run smartctl --scan to discover devices
+        res = subprocess.run(["smartctl", "--scan"], capture_output=True, text=True, check=True)
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if parts and parts[0].startswith("/dev/"):
+                devices.append(parts[0])
+    except Exception:
+        pass
 
-# Scan devices
-# NVMe drives
-for dev in /dev/nvme[0-9]; do
-    if [ -b "$dev" ] || [ -c "$dev" ]; then
-        parse_disk "$dev"
-    fi
-done
+    # Fallback to sysfs disk devices if smartctl scan fails or is empty
+    if not devices:
+        try:
+            for dev in os.listdir("/dev/"):
+                if re.match(r"^(sd[a-z]|nvme[0-9]+n[0-9]+)$", dev):
+                    devices.append(f"/dev/{dev}")
+        except Exception:
+            pass
 
-# SATA drives (sda to sdz)
-for dev in /dev/sd[a-z]; do
-    if [ -b "$dev" ]; then
-        # Exclude partitions (only read the main drive)
-        parse_disk "$dev"
-    fi
-done
+    return sorted(list(set(devices)))
+
+def parse_smartctl(device):
+    try:
+        res = subprocess.run(["smartctl", "-a", device], capture_output=True, text=True)
+        text = res.stdout
+    except Exception as e:
+        return f'3 "Storage_Health_{os.path.basename(device)}" - Status : UNKNOWN ❘ Error running smartctl: {str(e)}'
+
+    if not text.strip():
+        return f'3 "Storage_Health_{os.path.basename(device)}" - Status : UNKNOWN ❘ No output from smartctl'
+
+    # Detect device type
+    is_nvme = "Device Technology: NVMe" in text or "Model Number:" in text
+
+    # 1. Extract Model Name
+    model = "Unknown"
+    model_match = re.search(r"Model Number:\s+(.+)", text)
+    if not model_match:
+        model_match = re.search(r"Device Model:\s+(.+)", text)
+    if model_match:
+        model = model_match.group(1).strip()
+
+    # 2. Extract Capacity
+    capacity_gb_str = "N/A"
+    cap_match = re.search(r"(?:Namespace \d+ Size/Capacity:|User Capacity:)\s+([\d,]+)\s+bytes", text)
+    if cap_match:
+        capacity_bytes = int(cap_match.group(1).replace(",", ""))
+        # Convert to GB binary format
+        capacity_gb = round(capacity_bytes / (1024**3), 2)
+        capacity_gb_str = f"{capacity_gb} GB"
+
+    # 3. Extract Overall SMART Status
+    status = "UNKNOWN"
+    status_match = re.search(r"test result:\s+(\w+)", text, re.IGNORECASE)
+    if status_match:
+        status = status_match.group(1).strip().upper()
+
+    # 4. Extract Temperature
+    temp = "N/A"
+    temp_match = re.search(r"Temperature:\s+(\d+)\s+Celsius", text, re.IGNORECASE)
+    if temp_match:
+        temp = f"{temp_match.group(1)}C"
+    else:
+        # Search for temperature attributes in SATA table (Attr 194 or 190)
+        for line in text.splitlines():
+            if "Temperature_Celsius" in line or "Airflow_Temperature_Cel" in line:
+                parts = line.split()
+                if len(parts) >= 10:
+                    raw_val = parts[9]
+                    m = re.match(r"\d+", raw_val)
+                    if m:
+                        temp = f"{m.group(0)}C"
+                        break
+
+    # 5. Extract Power On Hours
+    poh = 0
+    poh_match = re.search(r"Power On Hours:\s+([\d,]+)", text, re.IGNORECASE)
+    if poh_match:
+        poh = int(poh_match.group(1).replace(",", ""))
+    else:
+        for line in text.splitlines():
+            if "Power_On_Hours" in line:
+                parts = line.split()
+                if len(parts) >= 10:
+                    raw_val = parts[9].replace(",", "")
+                    m = re.match(r"\d+", raw_val)
+                    if m:
+                        poh = int(m.group(0))
+                        break
+
+    # 6. Extract Health (Remaining Life)
+    health = 100
+    if is_nvme:
+        pct_match = re.search(r"Percentage Used:\s+(\d+)%", text)
+        if pct_match:
+            health = 100 - int(pct_match.group(1))
+    else:
+        found_health = False
+        for line in text.splitlines():
+            parts = line.split()
+            if len(parts) >= 10:
+                attr_id = parts[0]
+                attr_name = parts[1]
+                # Normalized value is under VALUE column (typically index 3)
+                if attr_id in ["231", "169", "173", "177"] or any(x in attr_name.lower() for x in ["ssd_life_left", "life_left", "wear_leveling_count", "remaining_lifetime_perc"]):
+                    try:
+                        health = int(parts[3])
+                        found_health = True
+                        break
+                    except ValueError:
+                        pass
+        if not found_health:
+            health = 100
+
+    # 7. Extract Data Read & Written (TB)
+    read_tb = 0.0
+    write_tb = 0.0
+
+    if is_nvme:
+        read_match = re.search(r"Data Units Read:\s+[\d,]+\s+\[([\d.]+)\s+([KMGTP]B)\]", text)
+        if read_match:
+            val = float(read_match.group(1))
+            unit = read_match.group(2)
+            if unit == "TB": read_tb = val
+            elif unit == "GB": read_tb = val / 1000.0
+            elif unit == "PB": read_tb = val * 1000.0
+
+        write_match = re.search(r"Data Units Written:\s+[\d,]+\s+\[([\d.]+)\s+([KMGTP]B)\]", text)
+        if write_match:
+            val = float(write_match.group(1))
+            unit = write_match.group(2)
+            if unit == "TB": write_tb = val
+            elif unit == "GB": write_tb = val / 1000.0
+            elif unit == "PB": write_tb = val * 1000.0
+    else:
+        # SATA attributes processing (LBAs Written / Read)
+        for line in text.splitlines():
+            parts = line.split()
+            if len(parts) >= 10:
+                attr_id = parts[0]
+                attr_name = parts[1]
+                raw_val = parts[9]
+
+                m = re.match(r"\d+", raw_val)
+                if m:
+                    num_val = int(m.group(0))
+                    # Handle Writes
+                    if attr_id == "241" or "total_lbas_written" in attr_name.lower() or "host_writes_32mib" in attr_name.lower() or "host_writes_gib" in attr_name.lower() or "lifetime_writes_gib" in attr_name.lower():
+                        if "32mib" in attr_name.lower():
+                            bytes_written = num_val * 32 * 1024 * 1024
+                        elif "gib" in attr_name.lower():
+                            bytes_written = num_val * 1024 * 1024 * 1024
+                        else:
+                            # Standard LBAs (sectors) = 512 bytes
+                            bytes_written = num_val * 512
+                        write_tb = bytes_written / (10**12)  # Decimal Terabytes
+
+                    # Handle Reads
+                    elif attr_id == "242" or "total_lbas_read" in attr_name.lower() or "host_reads_32mib" in attr_name.lower() or "host_reads_gib" in attr_name.lower() or "lifetime_reads_gib" in attr_name.lower():
+                        if "32mib" in attr_name.lower():
+                            bytes_read = num_val * 32 * 1024 * 1024
+                        elif "gib" in attr_name.lower():
+                            bytes_read = num_val * 1024 * 1024 * 1024
+                        else:
+                            bytes_read = num_val * 512
+                        read_tb = bytes_read / (10**12)
+
+    # Round read/write TB values
+    read_tb = round(read_tb, 1)
+    write_tb = round(write_tb, 1)
+
+    # 8. Calculate Write/Day (GB)
+    write_day_gb_str = "0.00 GB"
+    if poh > 0 and write_tb > 0:
+        days = poh / 24.0
+        if days > 0:
+            write_day_gb = (write_tb * 1000.0) / days
+            write_day_gb_str = f"{round(write_day_gb, 2)} GB"
+
+    # 9. Calculate Est. Life (Years)
+    est_life = ">10 Years"
+    wear = 100 - health
+    if wear > 0 and poh > 0:
+        years_used = poh / 8760.0
+        est_remaining_years = years_used * (100 - wear) / wear
+        if est_remaining_years < 10:
+            est_life = f"{round(est_remaining_years, 2)} Years"
+
+    # 10. Checkmk Alert Status
+    # Standard: OK if Health > 90 (status 0), WARN if Health <= 90 (status 1), CRIT if Health <= 80 (status 2)
+    status_code = 0
+    status_str = "OK"
+    if health <= 80:
+        status_code = 2
+        status_str = "Critical"
+    elif health <= 90:
+        status_code = 1
+        status_str = "Warning"
+
+    dev_name = os.path.basename(device)
+    return f'{status_code} "SSD Health {dev_name}" - Status : {status_str} ❘ Model: {model} ({capacity_gb_str}) ❘ Status: {status} ❘ Temp: {temp} ❘ Health: {health}% ❘ Read: {read_tb} TB ❘ Written: {write_tb} TB ❘ Write/Day: {write_day_gb_str} ❘ Est. Life: {est_life}'
+
+def main():
+    if not check_smartctl():
+        print('3 "Storage_Health_System" - Status : UNKNOWN ❘ smartctl is not installed on this system.')
+        sys.exit(0)
+
+    devices = get_storage_devices()
+    if not devices:
+        print('3 "Storage_Health_System" - Status : UNKNOWN ❘ No block storage devices discovered.')
+        sys.exit(0)
+
+    for dev in devices:
+        print(parse_smartctl(dev))
+
+if __name__ == "__main__":
+    main()
