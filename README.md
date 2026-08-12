@@ -1,185 +1,131 @@
-# Blueprint Sistem Pemantauan Aset Terpadu - Checkmk
+# Standardisasi & Panduan Deployment Agen Checkmk
+Repositori Utama: **andin1st/scriptcmk**
 
-Dokumen ini berisi spesifikasi teknis, arsitektur, dan panduan operasional lengkap untuk deployment sistem pemantauan aset perusahaan berbasis **Checkmk** secara otomatis (_GitHub Bootstrap_) untuk host Linux dan Windows.
+Dokumen ini adalah panduan teknis resmi bagi Tim IT untuk melakukan instalasi, konfigurasi, dan pemantauan perangkat keras (server, desktop, dan laptop) menggunakan **Checkmk** secara otomatis dan terstandarisasi.
 
 ---
 
-## 📁 Struktur Repositori GitHub
+## 1. Peta Struktur Repositori (`andin1st/scriptcmk`)
+
+Seluruh berkas installer, konfigurasi, dan skrip *local checks* disimpan secara terpusat pada repositori GitHub **`andin1st/scriptcmk`** dengan struktur sebagai berikut:
 
 ```text
-checkmk-agent-deploy/
-├── README.md                 # Panduan tim IT (Dokumen ini)
-├── .gitignore                # File filter Git untuk keamanan data
-├── docker-compose.yml         # Konfigurasi container Checkmk CE 2.5 di Server
-├── linux/
-│   ├── install-v5.sh         # Script installer otomatis Linux (Input Dinamis)
-│   └── local_checks/         # Script pemantauan kustom Linux
-│       ├── cpu_os_info.sh     # Detail OS, Spesifikasi CPU & Suhu
-│       ├── ram_health.sh      # RAM Health (Membaca hasil memtester)
-│       ├── disk_nvme_health.sh# Kesehatan drive SATA HDD & NVMe SSD
-│       ├── remote_apps.sh     # Deteksi ID AnyDesk & RustDesk
-│       └── battery_health.sh  # Deteksi baterai Laptop vs PC (Baru!)
-└── windows/
-    ├── install.ps1           # Script installer otomatis Windows (PowerShell)
-    └── local_checks/         # Script pemantauan kustom Windows
-        ├── os_cpu_health.ps1  # Detail OS, Lisensi Windows & Suhu CPU
-        ├── ram_health.ps1     # RAM Health (Membaca log Windows Memory)
-        ├── disk_nvme_health.ps1 # Kesehatan Disk & SSD NVMe (Wearout, TBW)
-        ├── remote_apps.ps1    # Deteksi ID AnyDesk & RustDesk Windows
-        └── ms_office_status.ps1 # Versi & Status Lisensi MS Office (ospp.vbs)
+andin1st/scriptcmk/
+├── .gitignore
+├── README.md                          # Panduan utama ini
+├── docker-compose-checkmk.yml         # Konfigurasi container Server Checkmk
+└── linux/
+    ├── install.sh                     # Skrip bootstrap utama Linux (v6 Multi-Distro)
+    └── local_checks/                  # Folder berisi 10 skrip local checks Linux
+        ├── battery_health.sh          # Deteksi baterai laptop vs PC (via UPower)
+        ├── cpu_info.sh                # Spesifikasi CPU, core/thread, load & suhu real-time
+        ├── cpu_os_info.sh             # Skrip gabungan spesifikasi CPU & OS (legacy)
+        ├── disk_nvme_health.sh        # Deteksi kesehatan & TBW SSD NVMe & SATA (Python-based)
+        ├── fan_health.sh              # Deteksi putaran kipas vs suhu CPU
+        ├── OS_info.sh                 # Informasi spesifik distribusi OS & versi Kernel
+        ├── ram_health.sh              # Pembaca log pengujian memtester asinkron
+        ├── ram_usage.sh               # Informasi kapasitas & persentase RAM terpakai
+        ├── remote_apps.sh             # Informasi ID AnyDesk / RustDesk yang aktif
+        └── storage_usage.sh           # Pemantau kapasitas partisi disk (non-virtual)
 ```
 
 ---
 
-## 1. Arsitektur & Deployment Server
+## 2. Panduan Deployment Cepat (One-Liner Bootstrap)
 
-Sistem Server Checkmk dijalankan secara mandiri (_self-hosted_) menggunakan Docker dan dikelola melalui Docker Compose untuk kemudahan manajemen dan portabilitas.
+Proses instalasi Checkmk Agent beserta seluruh skrip *local checks* di atas telah diotomatisasi penuh. Tim IT cukup menjalankan perintah satu baris (*one-liner*) di bawah ini langsung dari terminal komputer client.
 
-### Berkas Konfigurasi: `docker-compose-checkmk.yml`
+### **A. Instalasi pada Host Linux (Ubuntu, Debian, Fedora, RHEL, CentOS)**
+Skrip installer `install.sh` akan mendeteksi varian distribusi OS secara otomatis, mengunduh file paket agen (`.deb` atau `.rpm`), menginstal semua dependensi (`smartmontools`, `memtester`, `lm-sensors`, `upower`), lalu mendaftarkan cron job pengujian RAM otomatis.
 
-Server berjalan menggunakan citra (_image_) Checkmk Enterprise/Raw Edition dengan konfigurasi volume persisten untuk menyimpan data situs monitoring secara aman.
-
+#### **Opsi 1: Mode Interaktif (Direkomendasikan untuk mesin tunggal)**
+Jalankan perintah berikut, lalu masukkan IP Server Checkmk dan Site ID saat diminta di layar terminal:
 ```bash
-# Cara Menjalankan Server Checkmk
-docker compose -f docker-compose-checkmk.yml up -d
+curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install.sh -o /tmp/install.sh && bash /tmp/install.sh
+```
+
+#### **Opsi 2: Mode Instan (Direkomendasikan untuk deployment massal / scripting)**
+Jalankan perintah dengan langsung menyuplai parameter IP Server (`-s`), Site ID (`-d`), versi agen (`-v`), dan repositori target (`-g`):
+```bash
+curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install.sh | bash -s -- -s 192.168.1.100 -d mysite -v 2.5.0p9-1 -g andin1st/scriptcmk
 ```
 
 ---
 
-## 2. Strategi Deployment Agen (GitHub Bootstrap)
+## 3. Matriks Parameter & Standardisasi Threshold
 
-Pemasangan agen di sisi client dilakukan secara otomatis menggunakan skrip installer satu baris (_one-liner bootstrap_) yang mengunduh seluruh dependensi langsung dari repositori GitHub perusahaan.
+Sesuai dengan dokumen **Standarisasi Monitoring CheckMK**, berikut adalah batas ambang kebijakan (*threshold*) keputusan status monitoring yang diterapkan di seluruh mesin:
 
-### A. Linux Host Installer (`install-v6.sh`)
-
-Skrip ini memiliki kecerdasan **Multi-Distribusi** untuk mendukung berbagai varian sistem operasi Linux:
-
-- **Debian/Ubuntu**: Menggunakan manajer paket `apt-get` dan memasang berkas agen berformat `.deb` (misal: `check-mk-agent_2.5.0p9-1_all.deb`).
-- **Fedora/RHEL/CentOS/Rocky**: Mengaktifkan EPEL repository secara aman, menggunakan manajer paket `dnf`/`yum`, dan memasang berkas agen berformat `.rpm` (misal: `check-mk-agent-2.5.0p9-1.noarch.rpm`).
-
-#### Fitur Utama `install-v6.sh`:
-
-1.  **Pemasangan Dependensi**: Menginstal otomatis paket pendukung seperti `smartmontools` (smartctl), `memtester`, `lm-sensors`, dan `upower`.
-2.  **Keamanan Eksekusi Pipa (`curl | bash`)**: Menggunakan pengalihan input `/dev/tty` pada perintah `read` interaktif untuk mencegah pemotongan kode (_pipe truncation_) dan error sintaksis `fi`.
-3.  **Mode Otomatisasi Penuh (Silent/Non-Interaktif)**: Mendukung argumen CLI untuk deployment massal via SSH:
-    ```bash
-    curl -sSL https://raw.githubusercontent.com/<username>/<repo>/main/linux/install-v6.sh | sudo bash -s -- -s <IP_SERVER_CHECKMK> -d <SITE_ID> -v 2.5.0p9-1
-    ```
-
-### B. Windows Host Installer (`install.ps1`)
-
-Menjalankan perintah PowerShell bypass, memasang agen berformat `.msi` secara senyap (_silent installation_), mengunduh skrip pemantauan PowerShell, dan membuat _Windows Task Scheduler_ untuk pengetesan RAM asinkron.
-
-Buka PowerShell sebagai Administrator pada client Windows dan jalankan:
-
-```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/<username>/<repo_name>/main/windows/install.ps1'))
-```
+| No | Parameter | OK (0) | Warning (1) | Critical (2) | Sumber Data & Mekanisme |
+|---|---|---|---|---|---|
+| 1 | **Suhu CPU** | $\le 75^\circ\text{C}$ | $> 85^\circ\text{C}$ | - | Dibaca dari sensor termal core CPU terdekat |
+| 2 | **Kipas Processor** | $> 1600\text{ RPM}$ atau $0\text{ RPM}$ (jika fanless) | $< 1600\text{ RPM}$ | - | Membandingkan kecepatan kipas terhadap suhu |
+| 3 | **Kesehatan Baterai** | $\ge 60\%$ | $\le 40\%$ | $\le 20\%$ | Membaca UPower D-Bus, fallback ke Sysfs |
+| 4 | **Kesehatan SSD (SATA/NVMe)**| $> 90\%$ | $\le 90\%$ | $\le 80\%$ | Membaca persentase keausan (*wearout rate*) SMART |
+| 5 | **Storage Usage** | $< 85\%$ | $\ge 85\%$ | $\ge 95\%$ | Kapasitas terpakai pada semua partisi riil |
+| 6 | **RAM Usage** | $< 85\%$ | $\ge 85\%$ | $\ge 95\%$ | Persentase RAM terpakai via `/proc/meminfo` |
+| 7 | **RAM Health** | Passed | Failed | Failed | Pengujian asinkron `memtester` tiap 2 minggu |
 
 ---
 
-## 3. Spesifikasi Metrik Pemantauan (Local Checks) - Linux
+## 4. Rincian 10 Skrip Local Checks Linux
 
-Seluruh skrip diletakkan di bawah direktori `/usr/lib/check_mk_agent/local/` pada client dan dieksekusi oleh Checkmk Agent secara berkala.
+Setiap skrip diletakkan di direktori `/usr/lib/check_mk_agent/local/` dan menghasilkan keluaran terstandarisasi dengan pemisah tanda **Unicode Light Vertical Bar (`❘`)** agar aman dari kesalahan pemotongan parser Checkmk:
 
-### 1. Sistem Operasi (`OS_info.sh`)
+### 1. `battery_health.sh`
+*   **Fungsi**: Mendeteksi secara dinamis apakah perangkat menggunakan baterai (Laptop) atau catu daya langsung (PC/Desktop).
+*   **Mekanisme**: Membaca sensor dari UPower (D-Bus), dengan fallback ke `/sys/class/power_supply/`.
+*   **Keluaran Laptop**:
+    `0 "Battery_Health" - Status Battery : Discharging ❘ Design Capacity : 40w/h ❘ Current Capacity : 20w/h ❘ Health : 50% ❘ Battery Level : 100%`
+*   **Keluaran PC/Desktop**:
+    `0 "Battery_Health" - Device is PC/Desktop, there is no battery.`
 
-- **Fungsi**: Membaca `/etc/os-release` dan menampilkan detail distribusi OS serta versi kernel secara dinamis.
-- **Format Output**:
-  ```text
-  0 "OS_Detail" - OS: Ubuntu 24.04 LTS, Kernel: 6.8.0-40-generic
-  ```
+### 2. `cpu_info.sh`
+*   **Fungsi**: Membaca spesifikasi teknis CPU murni tanpa noise dagang, mengukur clock speed, core/thread, utilisasi, serta suhu CPU secara real-time.
+*   **Keluaran**:
+    `0 "CPU_Info" - Spesifikasi : Intel Core i3 13100 ❘ Clock Speed : 3.4Ghz ❘ Core/Thread : 4/8 ❘ CPU Load : 12% ❘ CPU Temperature: 48 Celcius`
 
-### 2. Unit Pemrosesan Sentral (`cpu_info.sh`)
+### 3. `cpu_os_info.sh`
+*   **Fungsi**: Skrip *legacy* gabungan yang menyajikan data singkat ringkasan sistem operasi dan perangkat prosesor dalam satu baris monitoring.
 
-- **Fungsi**: Mengidentifikasi spesifikasi CPU murni (menyaring kata kotor dagang), menghitung kecepatan core maksimal (GHz), rasio core/thread, utilitas CPU real-time via `/proc/stat`, serta suhu real-time.
-- **Sensor Suhu Pintar**: Memprioritaskan sensor fisik CPU (`CPUTIN` atau `k10temp`) dan mengabaikan sensor virtual ACPI kosong (yang sering memicu pembacaan salah `16°C`).
-- **Format Output**:
-  ```text
-  0 "CPU_Info" - Spesifikasi : Intel Core i3 13100 | Clock Speed : 3.4Ghz | Core/Thread : 4/8 | CPU Load : 12% | CPU Temperature: 46 Celcius
-  ```
+### 4. `disk_nvme_health.sh`
+*   **Fungsi**: Skrip Python terpadu untuk SSD NVMe & SATA. Menghitung Total Bytes Written (TBW) SSD SATA menggunakan algoritma konversi sektor LBA ke Terabyte desimal, serta dilengkapi pendeteksian heuristik untuk brand controller (Apacer, V-Gen, Kingmax, dll).
+*   **Keluaran**:
+    `0 "Storage_Health_sda" - Status : OK ❘ Model: Apacer AS340 240GB (223.57 GB) ❘ Status: PASSED ❘ Temp: 35C ❘ Health: 100% ❘ Read: 6.5 TB ❘ Written: 5.4 TB ❘ Write/Day: 108.64 GB ❘ Est. Life: >10 Years`
 
-### 3. Kesehatan RAM Asinkron (`ram_health.sh`)
+### 5. `fan_health.sh`
+*   **Fungsi**: Membandingkan kecepatan kipas (RPM) dan suhu CPU secara dinamis.
+*   **Aturan**: Status Critical (2) jika suhu $> 85^\circ\text{C}$ dan kipas $< 1600\text{ RPM}$. Status Warning (1) jika suhu $> 65^\circ\text{C}$ dan kipas $< 1000\text{ RPM}$.
+*   **Keluaran**:
+    `0 "FAN_Health" - Status : OK ❘ FAN Speed : 2319rpm ❘ Remark: FAN Condition Good`
 
-- **Fungsi**: Membaca file log `/var/log/checkmk_custom/memtester_health.log` hasil pengujian perangkat lunak `memtester` yang dijalankan otomatis setiap 2 minggu sekali sebesar **20% dari Free RAM** (diatur oleh scheduler `/usr/local/bin/run_memtester.sh`).
-- **Format Output**:
-  ```text
-  0 "RAM_Health" - Status Memory: Ok, tidak ditemukan error saat pengecekan | Sample Pengujian : 2GB | Mon Aug 10 02:00:15 UTC 2026
-  ```
+### 6. `OS_info.sh`
+*   **Fungsi**: Melacak distribusi Linux yang terpasang secara dinamis beserta detail versi kernel yang sedang berjalan.
+*   **Keluaran**:
+    `0 "OS_Detail" - OS: Ubuntu 24.04 LTS, Kernel: 6.8.0-40-generic`
 
-### 4. Penggunaan RAM Real-Time (`ram_usage.sh`)
+### 7. `ram_health.sh`
+*   **Fungsi**: Membaca file log `/var/log/checkmk_custom/memtester_health.log` hasil uji RAM asinkron 20% Free RAM yang dijalankan scheduler `run_memtester.sh`.
+*   **Keluaran**:
+    `0 "RAM_Health" - Status Memory: Ok, tidak ditemukan error saat pengecekan ❘ Sample Pengujian : 2GB ❘ Mon Aug 10 02:00:15 UTC 2026`
 
-- **Fungsi**: Memantau tingkat penggunaan memori RAM fisik aktif secara real-time berdasarkan `/proc/meminfo` dengan fallback perintah `free`.
-- **Ambang Batas**: OK (`< 85%`), Warning (`≥ 85%`), Critical (`≥ 95%`).
-- **Format Output**:
-  ```text
-  0 "RAM_Usage" - Status : OK ❘ Used: 45% ❘ Used Space: 3.60 GB ❘ Free: 4.40 GB ❘ Total: 8.00 GB
-  ```
+### 8. `ram_usage.sh`
+*   **Fungsi**: Memantau kapasitas penggunaan RAM fisik secara presisi (Used, Used Space, Free, dan Total).
+*   **Keluaran**:
+    `0 "RAM_Usage" - Status : OK ❘ Used: 45% ❘ Used Space: 3.60 GB ❘ Free: 4.40 GB ❘ Total: 8.00 GB`
 
-### 5. Penggunaan Penyimpanan Disk (`storage_usage.sh`)
+### 9. `remote_apps.sh`
+*   **Fungsi**: Membaca file konfigurasi AnyDesk atau RustDesk untuk memunculkan ID remote support perangkat secara instan di dashboard Checkmk.
+*   **Keluaran**:
+    `0 "Remote_Support" - AnyDesk ID: 123456789 ❘ RustDesk ID: 987654321`
 
-- **Fungsi**: Memantau kapasitas penggunaan ruang penyimpanan di seluruh partisi lokal aktif secara otomatis. Menggunakan penyaringan sistem berkas virtual untuk mengecualikan partisi semu seperti `tmpfs`, `devtmpfs`, `shm`, dll.
-- **Ambang Batas**: OK (`< 85%`), Warning (`≥ 85%`), Critical (`≥ 95%`).
-- **Format Output**:
-  ```text
-  0 "Storage_Usage_root" - Status : OK ❘ Partition: / ❘ Used: 42% ❘ Free: 139.20 GB ❘ Total: 240.00 GB
-  ```
-
-### 6. Kesehatan Penyimpanan Terpadu (`disk_nvme_health.sh`)
-
-- **Fungsi**: Skrip berbasis Python 3 yang memantau kesehatan SSD NVMe dan SATA secara seragam.
-- **Algoritma Heuristik Penulisan (SATA TBW Fix)**: Otomatis mendeteksi jika kontroler SSD (seperti Apacer, V-Gen, Phison, SMI, dll.) menyimpan Atribut ID 241 (`Total_LBAs_Written`) dalam skala **Gigabyte** (GB) langsung, bukan skala sektor standar industri (512B), guna mencegah pembacaan error `0.0 TB`.
-- **Estimasi Sisa Umur**: Menghitung sisa usia operasional SSD secara dinamis berdasarkan persentase keausan terhadap waktu aktif (_Power-On Hours_).
-- **Format Output**:
-  ```text
-  0 "Storage_Health_sda" - Status : OK ❘ Model: Apacer AS340 240GB (223.57 GB) ❘ Status: PASSED ❘ Temp: 34C ❘ Health: 100% ❘ Read: 6.5 TB ❘ Written: 5.4 TB ❘ Write/Day: 108.64 GB ❘ Est. Life: >10 Years
-  ```
-
-### 7. Kesehatan Baterai (`battery_health.sh`)
-
-- **Fungsi**: Mendeteksi otomatis jenis perangkat keras client (_Laptop vs Desktop_). Membaca status pengisian, kapasitas desain/saat ini, tingkat kesehatan %, dan level baterai menggunakan utilitas `upower` (dengan fallback otomatis ke `/sys/class/power_supply/` jika paket `upower` absen).
-- **Format Output Laptop**:
-  ```text
-  0 "Battery_Health" - Status Battery : Discharging | Design Capacity : 40w/h | Current Capacity : 36w/h | Health : 90% | Battery Level : 95%
-  ```
-- **Format Output PC/Desktop**:
-  ```text
-  0 "Battery_Health" - Device is PC/Desktop, there is no battery.
-  ```
-
-### 8. Hubungan Suhu & Kipas (`fan_health.sh`)
-
-- **Fungsi**: Mengorelasikan suhu CPU terhadap kecepatan putaran kipas pendingin (_FAN speed RPM_) dari sensor motherboard secara dinamis.
-- **Logika Aturan**:
-  - **Critical**: Jika suhu `> 85°C` dan kecepatan kipas `< 1600 RPM`.
-  - **Warning**: Jika suhu `> 65°C` dan kecepatan kipas `< 1000 RPM`.
-  - **OK**: Jika suhu `< 65°C` dengan kecepatan kipas berapa pun (sehat/aman).
-- **Format Output**:
-  ```text
-  0 "FAN_Health" - Status : OK | FAN Speed : 2319rpm | Remark: FAN Condition Good
-  ```
-
-### 9. Aplikasi Dukungan Jarak Jauh (`remote_apps.sh`)
-
-- **Fungsi**: Memindai sistem untuk mendeteksi ID aplikasi remote support yang terpasang seperti AnyDesk atau RustDesk untuk mempermudah inventarisasi tim helpdesk.
+### 10. `storage_usage.sh`
+*   **Fungsi**: Memantau kapasitas partisi fisik lokal yang terpasang di sistem dan otomatis mengabaikan file system virtual.
+*   **Keluaran**:
+    `0 "Storage_Usage_root" - Status : OK ❘ Partition: / ❘ Used: 42% ❘ Free: 139.20 GB ❘ Total: 240.00 GB`
 
 ---
 
-## 4. Parameter Standarisasi Ambang Batas (Sesuai PDF Proyek)
-
-Berikut adalah ringkasan matriks parameter ambang batas keputusan status peringatan (_alert threshold_) yang diimplementasikan di dalam seluruh skrip monitoring:
-
-| Parameter Pemantauan  | Status OK (0)                                                 | Status Warning (1)                                   | Status Critical (2)                                  | Catatan Teknik                  |
-| :-------------------- | :------------------------------------------------------------ | :--------------------------------------------------- | :--------------------------------------------------- | :------------------------------ |
-| **Suhu CPU**          | $\le 75^\circ\text{C}$                                        | $> 75^\circ\text{C}$ s.d $85^\circ\text{C}$          | $> 85^\circ\text{C}$                                 | Diisolasi dari CPUTIN/k10temp   |
-| **Kecepatan Kipas**   | $> 1600\text{ RPM}$ atau $0\text{ RPM}$ (Desktop Tanpa Kipas) | $< 1600\text{ RPM}$ (saat suhu $> 85^\circ\text{C}$) | $< 1600\text{ RPM}$ (saat suhu $> 85^\circ\text{C}$) | Mencegah false-alarm PC fanless |
-| **Kesehatan Baterai** | $\ge 60\%$                                                    | $\le 40\%$                                           | $\le 20\%$                                           | Terintegrasi via UPower         |
-| **Kesehatan SSD**     | $> 90\%$                                                      | $\le 90\%$                                           | $\le 80\%$                                           | Berdasarkan wearout %           |
-| **Sisa Umur SSD**     | $> 1\text{ Tahun}$                                            | $\le 1\text{ Tahun}$                                 | $\le 0.5\text{ Tahun}$                               | Perhitungan linier akumulatif   |
-| **Storage Usage**     | $< 85\%$                                                      | $\ge 85\%$                                           | $\ge 95\%$                                           | Menyaring partisi semu/virtual  |
-| **RAM Usage**         | $< 85\%$                                                      | $\ge 85\%$                                           | $\ge 95\%$                                           | Berdasarkan MemAvailable riil   |
-| **RAM Health (Log)**  | `Passed`                                                      | -                                                    | `Failed`                                             | Hasil pengujian memtester       |
-
----
-
-_Dokumen ini diperbarui secara berkala mengikuti perkembangan penyesuaian parameter dan dukungan sensor pada infrastruktur aset perusahaan._
+## 5. Rencana & Langkah Pengembangan Selanjutnya
+1.  **Standardisasi Host Windows**: Menyinkronkan fungsionalitas monitoring penyimpanan (`volume_usage.ps1`) dan RAM (`ram_usage.ps1`) pada Windows menggunakan kerangka kerja PowerShell yang serupa.
+2.  **Pemolesan Otomasi Deployment MSI Windows**: Menyelaraskan argumen parameter instalasi silent MSI pada Windows Host agar setara dengan keandalan skrip `install.sh` Linux.
