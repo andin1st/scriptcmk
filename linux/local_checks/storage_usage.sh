@@ -65,7 +65,7 @@ echo "$df_output" | tail -n +2 | while read -r fs type total used avail pct moun
     if [ -z "$mount_clean" ]; then
         mount_clean="root"
     fi
-    service_name="Storage_Usage_${mount_clean}"
+    service_name="SSD Usage - ${mount_clean}"
 
     # 7. Evaluasi Kode Status Checkmk berdasarkan Standar Proyek:
     # OK (0): Usage < 85%

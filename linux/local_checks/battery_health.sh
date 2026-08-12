@@ -53,7 +53,7 @@ else
     done
 
     if [ -z "$BAT_DIR" ]; then
-        echo "0 \"Battery_Health\" - Device is PC/Desktop, there is no battery."
+        echo "0 \"Battery Health\" - Device is PC/Desktop, there is no battery."
         exit 0
     fi
 
