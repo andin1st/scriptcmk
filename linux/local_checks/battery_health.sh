@@ -10,7 +10,7 @@ if command -v upower >/dev/null 2>&1; then
 
     if [ -z "$BAT_PATH" ]; then
         # Jika upower aktif tapi tidak mendeteksi baterai sama sekali -> PC/Desktop
-        echo "0 \"Battery_Health\" - Device is PC/Desktop, there is no battery."
+        echo "0 \"Battery Health\" - Device is PC/Desktop, there is no battery."
         exit 0
     fi
 
