@@ -192,7 +192,7 @@ def process_device(device_name):
         
     status_text = "OK" if chk_status == 0 else ("WARNING" if chk_status == 1 else "CRITICAL")
     
-    output_line = f"{chk_status} \"Storage_Health_{device_name}\" - Status : {status_text} ❘ Model: {model_display} ❘ Status: {raw_status} ❘ Temp: {temp}C ❘ Health: {health}% ❘ Read: {read_tb:.1f} TB ❘ Written: {written_tb:.1f} TB ❘ Write/Day: {write_per_day:.2f} GB ❘ Est. Life: {est_life_str}"
+    output_line = f"{chk_status} \"SSD Health {device_name}\" - Status : {status_text} ❘ Model: {model_display} ❘ Status: {raw_status} ❘ Temp: {temp}C ❘ Health: {health}% ❘ Read: {read_tb:.1f} TB ❘ Written: {written_tb:.1f} TB ❘ Write/Day: {write_per_day:.2f} GB ❘ Est. Life: {est_life_str}"
     return output_line
 
 def main():
