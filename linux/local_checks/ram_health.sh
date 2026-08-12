@@ -47,12 +47,12 @@ fi
 # 4. Evaluasi status Checkmk dan keluarkan format kustom Anda
 if grep -q "STATUS: SUCCESS" "$LOG_FILE"; then
     # Status 0 = OK (Sesuai format permintaan Anda)
-    echo "0 \"RAM_Health\" - Status Memory: Ok, tidak ditemukan error saat pengecekan | Sample Pengujian : $sample_size | $timestamp"
+    echo "0 \"RAM Health\" - Status Memory: Ok, tidak ditemukan error saat pengecekan | Sample Pengujian : $sample_size | $timestamp"
 elif grep -q "STATUS: FAILED" "$LOG_FILE"; then
     # Status 2 = CRITICAL
-    echo "2 \"RAM_Health\" - Status Memory: Critical, ditemukan error kerusakan memory! | Sample Pengujian : $sample_size | $timestamp"
+    echo "2 \"RAM Health\" - Status Memory: Critical, ditemukan error kerusakan memory! | Sample Pengujian : $sample_size | $timestamp"
 else
     # Status 1 = WARNING (Sedang berjalan / log belum lengkap)
-    echo "1 \"RAM_Health\" - Status Memory: Warning, pengujian RAM sedang berlangsung | Sample Pengujian : $sample_size | $timestamp"
+    echo "1 \"RAM Health\" - Status Memory: Warning, pengujian RAM sedang berlangsung | Sample Pengujian : $sample_size | $timestamp"
 fi
 
