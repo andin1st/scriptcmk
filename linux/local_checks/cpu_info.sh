@@ -142,4 +142,4 @@ elif [ "$temp_int" -gt 75 ]; then
 fi
 
 # Tampilkan dalam format kustom yang rapi
-echo "$status \"CPU Info\" - Spesifikasi : $cpu_model | Clock Speed : $clock_speed | Core/Thread : $cores_threads | CPU Load : ${cpu_load}% | CPU Temperature: $temp_int Celcius"
+echo "$status \"CPU Info\" - Spesifikasi : $cpu_model | Clock Speed : $clock_speed | Core/Thread : $cores_threads | CPU Load : ${cpu_load}% | CPU Temperature: $temp_int C"
