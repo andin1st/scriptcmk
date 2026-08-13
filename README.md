@@ -44,7 +44,7 @@ Skrip installer `install.sh` akan mendeteksi varian distribusi OS secara otomati
 Jalankan perintah berikut, lalu masukkan IP Server Checkmk dan Site ID saat diminta di layar terminal:
 
 ```bash
-curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install.sh -o /tmp/install.sh && bash /tmp/install.sh
+curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install-v6.sh -o /tmp/install.sh && bash /tmp/install.sh
 ```
 
 #### **Opsi 2: Mode Instan (Direkomendasikan untuk deployment massal / scripting)**
@@ -52,7 +52,7 @@ curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/inst
 Jalankan perintah dengan langsung menyuplai parameter IP Server (`-s`), Site ID (`-d`), versi agen (`-v`), dan repositori target (`-g`):
 
 ```bash
-curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install.sh | bash -s -- -s 192.168.1.100 -d mysite -v 2.5.0p9-1 -g andin1st/scriptcmk
+curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install-v6.sh | bash -s -- -s 192.168.1.100 -d mysite -v 2.5.0p9-1 -g andin1st/scriptcmk
 ```
 
 ---
