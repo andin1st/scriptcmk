@@ -364,12 +364,12 @@ def get_sata_info(dev_path, dev_name):
 
 def main():
     if not check_smartctl_installed():
-        print("3 \"Storage_Health\" - Error: smartctl is not installed on this system.")
+        print("3 \"Storage Health\" - Error: smartctl is not installed on this system.")
         sys.exit(0)
         
     devices = scan_devices()
     if not devices:
-        print("0 \"Storage_Health\" - No block devices detected.")
+        print("0 \"Storage Health\" - No block devices detected.")
         sys.exit(0)
         
     for dev_path, dev_name, dev_type in devices:
@@ -382,7 +382,7 @@ def main():
         if res:
             code, desc = res
             # Emit in Checkmk Local Check format
-            print(f"{code} \"Storage_Health_{dev_name}\" - {desc}")
+            print(f"{code} \"Storage Health {dev_name}\" - {desc}")
 
 if __name__ == "__main__":
     main()
