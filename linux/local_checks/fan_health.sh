@@ -86,43 +86,58 @@ EOF
 temp_val=$(get_cpu_temp)
 temp_int=$(printf "%.0f" "$temp_val" 2>/dev/null || echo "0")
 
-# 2. Dapatkan Kecepatan Kipas Maksimum (Active Fan RPM)
 fan_speed=0
+has_fan_sensor=false
+
 if command -v sensors >/dev/null 2>&1; then
-    # Cari baris fan, buang label sebelum titik dua (:) agar angka label fan seperti "fan1:" tidak ikut terbaca
     fan_lines=$(sensors 2>/dev/null | grep -i "fan" | cut -d':' -f2-)
-    
-    while read -r line; do
-        # Buang bagian dalam kurung kurawal/siku/tanda kurung (seperti min, max, dll)
-        line_clean=$(echo "$line" | cut -d'(' -f1)
-        
-        # Cari angka yang berpasangan dengan RPM/rpm
-        speed_raw=$(echo "$line_clean" | grep -o -E '[0-9.]+\s*[rR][pP][mM]' | grep -o -E '[0-9.]+')
-        if [ ! -z "$speed_raw" ]; then
-            speed_int=$(printf "%.0f" "$speed_raw" 2>/dev/null || echo "0")
-            if [ "$speed_int" -gt "$fan_speed" ]; then
-                fan_speed="$speed_int"
+    if [ ! -z "$fan_lines" ]; then
+        has_fan_sensor=true
+        while read -r line; do
+            line_clean=$(echo "$line" | cut -d'(' -f1)
+            speed_raw=$(echo "$line_clean" | grep -o -E '[0-9.]+\s*[rR][pP][mM]' | grep -o -E '[0-9.]+')
+            if [ ! -z "$speed_raw" ]; then
+                speed_int=$(printf "%.0f" "$speed_raw" 2>/dev/null || echo "0")
+                if [ "$speed_int" -gt "$fan_speed" ]; then
+                    fan_speed="$speed_int"
+                fi
             fi
-        fi
-    done <<EOF
+        done <<EOF
 $fan_lines
 EOF
+    fi
 fi
 
-# 3. Terapkan Aturan Pembandingan & Status Alert
+# Fallback ke sysfs jika ada
+if [ "$fan_speed" -eq 0 ]; then
+    sys_fan=$(cat /sys/class/hwmon/hwmon*/fan*_input 2>/dev/null | sort -nr | head -n 1)
+    if [ ! -z "$sys_fan" ] && [ "$sys_fan" -gt 0 ]; then
+        fan_speed="$sys_fan"
+        has_fan_sensor=true
+    fi
+fi
+
+# 3. Logika Evaluasi Status Berdasarkan Ada/Tidaknya Sensor RPM
 status=0
 status_txt="OK"
 remark="FAN Condition Good"
 
-if [ "$temp_int" -gt 85 ] && [ "$fan_speed" -lt 1600 ]; then
-    status=2
-    status_txt="Critical"
-    remark="Please check thermal pasta cooling system"
-elif [ "$temp_int" -gt 65 ] && [ "$fan_speed" -lt 1000 ]; then
-    status=1
-    status_txt="Warning"
-    remark="Please check thermal pasta cooling system"
+if [ "$fan_speed" -gt 0 ]; then
+    # Jika sensor RPM terbaca
+    if [ "$temp_int" -gt 85 ] && [ "$fan_speed" -lt 1600 ]; then
+        status=2; status_txt="Critical"; remark="Please check thermal pasta / cooling system"
+    elif [ "$temp_int" -gt 75 ] && [ "$fan_speed" -lt 1000 ]; then
+        status=1; status_txt="Warning"; remark="Please check thermal pasta / cooling system"
+    fi
+    echo "$status \"Health_FAN_Processor\" - Status : $status_txt | CPU Temp : ${temp_int}C | FAN Speed : ${fan_speed}rpm | Remark: $remark"
+else
+    # Jika sensor RPM TIDAK diekspos oleh BIOS Laptop (0 RPM)
+    if [ "$temp_int" -gt 85 ]; then
+        status=2; status_txt="Critical"; remark="CPU Sangat Panas (${temp_int}C) - Cek Fan/Thermal Pasta"
+    elif [ "$temp_int" -gt 75 ]; then
+        status=1; status_txt="Warning"; remark="CPU Cukup Panas (${temp_int}C) - Pantau Penggunaan"
+    else
+        status=0; status_txt="OK"; remark="Fan dikontrol oleh EC/BIOS Laptop (Sensor RPM Tidak Diekspos OS)"
+    fi
+    echo "$status \"Health_FAN_Processor\" - Status : $status_txt | CPU Temp : ${temp_int}C | FAN Speed : N/A (EC Managed) | Remark: $remark"
 fi
-
-# 4. Output dalam format kustom yang Anda minta
-echo "$status \"Health_FAN_Processor\" - Status : $status_txt | CPU Temp : ${temp_int}C | FAN Speed : ${fan_speed}rpm | Remark: $remark"
