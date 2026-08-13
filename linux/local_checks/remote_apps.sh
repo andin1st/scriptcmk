@@ -70,4 +70,4 @@ fi
 # ==========================================
 # 3. KIRIM OUTPUT KE CHECKMK
 # ==========================================
-echo "0 \"Remote Support\" - OK: AnyDesk: $anydesk_id | RustDesk: $rustdesk_id"
+echo "0 \"Info_Remote_Support\" - OK: AnyDesk: $anydesk_id | RustDesk: $rustdesk_id"

@@ -228,7 +228,7 @@ def parse_smartctl_output(text, device_name):
                 est_life = f"{est_life_years:.2f} Years"
                 
         # Format output string
-        output_line = f'{status_code} "Storage Health ({model_clean})" - Status : {status_word} ❘ Type: {disk_type} ({cap_bracket}) ❘ Status: {smart_status} ❘ Temp: {temp}C ❘ Health: {health}% ❘ Read: {read_tb:.1f} TB ❘ Written: {write_tb:.1f} TB ❘ Write/Day: {write_day_gb:.2f} GB ❘ Est. Life: {est_life}'
+        output_line = f'{status_code} "Health_Storage ({model_clean})" - Status : {status_word} ❘ Type: {disk_type} ({cap_bracket}) ❘ Status: {smart_status} ❘ Temp: {temp}C ❘ Health: {health}% ❘ Read: {read_tb:.1f} TB ❘ Written: {write_tb:.1f} TB ❘ Write/Day: {write_day_gb:.2f} GB ❘ Est. Life: {est_life}'
     else:
         # HDD Sata
         reallocated = attributes.get(5)[1] if attributes.get(5) else 0
@@ -247,7 +247,7 @@ def parse_smartctl_output(text, device_name):
         rot_rate_clean = rotation_rate.replace(" ", "").replace("RPM", "rpm")
         
         # Format output string for HDD
-        output_line = f'{status_code} "Storage Health ({model_clean})" - Status : {status_word} ❘ Type: HDD ({cap_bracket}) ❘ Status: {smart_status} ❘ Temp: {temp}C ❘ Rotation Rate: {rot_rate_clean} | Realocated Sector: {reallocated}❘ Power On Hours: {poh} Hrs ❘ Remark: {remark}'
+        output_line = f'{status_code} "Health_Storage ({model_clean})" - Status : {status_word} ❘ Type: HDD ({cap_bracket}) ❘ Status: {smart_status} ❘ Temp: {temp}C ❘ Rotation Rate: {rot_rate_clean} | Realocated Sector: {reallocated}❘ Power On Hours: {poh} Hrs ❘ Remark: {remark}'
         
     return output_line
 
@@ -265,12 +265,12 @@ def get_block_devices():
 
 def main():
     if not shutil.which('smartctl'):
-        print("3 \"Storage Health\" - UNKNOWN: smartctl is not installed on this system.")
+        print("3 \"Health_Storage\" - UNKNOWN: smartctl is not installed on this system.")
         sys.exit(0)
         
     devices = get_block_devices()
     if not devices:
-        print("0 \"Storage Health\" - Status : OK ❘ No storage devices detected.")
+        print("0 \"Health_Storage\" - Status : OK ❘ No storage devices detected.")
         sys.exit(0)
         
     for dev in devices:
@@ -285,7 +285,7 @@ def main():
             print(line)
         except Exception as e:
             # Fallback if parsing fails to avoid breaking checkmk entirely
-            print(f'3 "Storage Health ({os.path.basename(dev)})" - UNKNOWN: Error parsing SMART data: {str(e)}')
+            print(f'3 "Health_Storage ({os.path.basename(dev)})" - UNKNOWN: Error parsing SMART data: {str(e)}')
 
 if __name__ == "__main__":
     main()

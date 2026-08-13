@@ -51,4 +51,4 @@ elif [ "$pct" -ge "$WARN" ]; then
 fi
 
 # Output in clean Checkmk format using unicode vertical bar ❘
-echo "$status \"RAM Usage\" - Status : $status_txt ❘ Used: ${pct}% ❘ Used Space: ${used_gb} GB ❘ Free: ${free_gb} GB ❘ Total: ${total_gb} GB"
+echo "$status \"Info_RAM_Usage\" - Status : $status_txt ❘ Used: ${pct}% ❘ Used Space: ${used_gb} GB ❘ Free: ${free_gb} GB ❘ Total: ${total_gb} GB"

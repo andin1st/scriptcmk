@@ -10,7 +10,7 @@ if command -v upower >/dev/null 2>&1; then
 
     if [ -z "$BAT_PATH" ]; then
         # Jika upower aktif tapi tidak mendeteksi baterai sama sekali -> PC/Desktop
-        echo "0 \"Battery Health\" - Device is PC/Desktop, there is no battery."
+        echo "0 \"Health_Battery\" - Device is PC/Desktop, there is no battery."
         exit 0
     fi
 
@@ -53,7 +53,7 @@ else
     done
 
     if [ -z "$BAT_DIR" ]; then
-        echo "0 \"Battery Health\" - Device is PC/Desktop, there is no battery."
+        echo "0 \"Health_Battery\" - Device is PC/Desktop, there is no battery."
         exit 0
     fi
 
@@ -93,4 +93,4 @@ if [ "$health" -ne 0 ] 2>/dev/null; then
 fi
 
 # 4. Output dalam format kustom yang Anda minta
-echo "$status \"Battery Health\" - Status Battery : $BAT_STATUS | Design Capacity : ${design_wh}w/h | Current Capacity : ${current_wh}w/h | Health : ${health}% | Battery Level : ${BAT_LEVEL}%"
+echo "$status \"Health_Battery\" - Status Battery : $BAT_STATUS | Design Capacity : ${design_wh}w/h | Current Capacity : ${current_wh}w/h | Health : ${health}% | Battery Level : ${BAT_LEVEL}%"
