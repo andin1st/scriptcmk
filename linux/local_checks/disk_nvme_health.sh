@@ -68,10 +68,10 @@ def process_device(device_name):
         res = subprocess.run(['smartctl', '-a', device_path], capture_output=True, text=True, timeout=5)
         smart_output = res.stdout
     except Exception as e:
-        return f"3 \"Storage_Health_{device_name}\" - Error running smartctl: {str(e)}"
+        return f"3 \"Storage_Health_{model_display}\" - Error running smartctl: {str(e)}"
         
     if not smart_output or "smartctl" not in smart_output.lower():
-        return f"3 \"Storage_Health_{device_name}\" - Error: No smartctl output."
+        return f"3 \"Storage_Health_{model_display}\" - Error: No smartctl output."
 
     is_nvme = "NVMe" in smart_output or "nvme" in device_name
     
@@ -192,7 +192,7 @@ def process_device(device_name):
         
     status_text = "OK" if chk_status == 0 else ("WARNING" if chk_status == 1 else "CRITICAL")
     
-    output_line = f"{chk_status} \"SSD Health {device_name}\" - Status : {status_text} ❘ Model: {model_display} ❘ Status: {raw_status} ❘ Temp: {temp}C ❘ Health: {health}% ❘ Read: {read_tb:.1f} TB ❘ Written: {written_tb:.1f} TB ❘ Write/Day: {write_per_day:.2f} GB ❘ Est. Life: {est_life_str}"
+    output_line = f"{chk_status} \"SSD Health {model_display}\" - Status : {status_text} ❘ Model: {model_display} ❘ Status: {raw_status} ❘ Temp: {temp}C ❘ Health: {health}% ❘ Read: {read_tb:.1f} TB ❘ Written: {written_tb:.1f} TB ❘ Write/Day: {write_per_day:.2f} GB ❘ Est. Life: {est_life_str}"
     return output_line
 
 def main():
