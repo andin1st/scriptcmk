@@ -1,388 +1,291 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# Local Check Checkmk: Storage Health (Unified SATA HDD, SATA SSD, and NVMe SSD)
+# Local Check Checkmk: Storage Health (SATA SSD, SATA HDD, NVMe)
 # ==============================================================================
-
-import subprocess
-import re
-import os
 import sys
+import os
+import glob
+import re
+import subprocess
+import shutil
 
-def check_smartctl_installed():
-    """Check if smartctl is installed and accessible."""
+def run_smartctl(device):
     try:
-        subprocess.run(["smartctl", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        return True
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return False
+        result = subprocess.run(['sudo', 'smartctl', '-a', device], capture_output=True, text=True, check=False)
+        return result.stdout
+    except Exception:
+        return ""
 
-def scan_devices():
-    """Scan for devices using smartctl --scan."""
-    devices = []
-    try:
-        out = subprocess.check_output(["smartctl", "--scan"], text=True, stderr=subprocess.DEVNULL)
-        for line in out.splitlines():
-            parts = line.split()
-            if parts:
-                dev_path = parts[0]
-                dev_name = os.path.basename(dev_path)
+def parse_smartctl_output(text, device_name):
+    # Initialize variables
+    model = "Unknown Model"
+    capacity_bytes = 0
+    cap_bracket = "Unknown"
+    is_nvme = False
+    is_ssd = True # default to SSD unless rotation rate found
+    rotation_rate = "Solid State Device"
+    smart_status = "PASSED"
+    
+    # Attributes for SATA
+    attributes = {}
+    
+    # Check device name first
+    if "nvme" in device_name.lower():
+        is_nvme = True
+        
+    # Lines
+    lines = text.split('\n')
+    
+    for line in lines:
+        line_strip = line.strip()
+        if not line_strip:
+            continue
+            
+        # Parse Model
+        if line_strip.startswith("Model Number:") or line_strip.startswith("Device Model:"):
+            model = line_strip.split(":", 1)[1].strip()
+            
+        # Parse Capacity
+        if line_strip.startswith("User Capacity:") or line_strip.startswith("Total NVM Capacity:"):
+            cap_match = re.search(r'([\d,]+)\s+bytes', line_strip)
+            if cap_match:
+                capacity_bytes = int(cap_match.group(1).replace(",", ""))
+            cap_bracket_match = re.search(r'\[([^\]]+)\]', line_strip)
+            if cap_bracket_match:
+                cap_bracket = cap_bracket_match.group(1).strip()
                 
-                # Exclude loop, ram, and virtual block devices
-                if any(x in dev_name for x in ["loop", "ram", "dm-", "md"]):
-                    continue
-                    
-                # Extract type if specified (-d)
-                dev_type = ""
-                for i, part in enumerate(parts):
-                    if part == '-d' and i + 1 < len(parts):
-                        dev_type = parts[i+1]
-                devices.append((dev_path, dev_name, dev_type))
-    except Exception:
-        pass
-    return devices
-
-def get_nvme_info(dev_path, dev_name):
-    """Parse NVMe health metrics."""
-    try:
-        out = subprocess.check_output(["smartctl", "-a", dev_path], text=True, stderr=subprocess.DEVNULL)
-    except Exception:
-        return None
-        
-    model = "Unknown NVMe"
-    capacity_str = "Unknown Capacity"
-    temp = "N/A"
-    health_pct = 100
-    read_tb_str = "0.0 TB"
-    written_tb_str = "0.0 TB"
-    poh = 0
-    status = "PASSED"
-    
-    for line in out.splitlines():
-        line = line.strip()
-        if line.startswith("Model Number:"):
-            model = line.split(":", 1)[1].strip()
-        elif line.startswith("Total NVM Capacity:"):
-            cap_parts = line.split(":", 1)[1].strip()
-            # Extract e.g. [1.02 TB]
-            m = re.search(r'\[(.*?)\]', cap_parts)
-            if m:
-                capacity_str = m.group(1)
-        elif line.startswith("Temperature:"):
-            m = re.search(r'(\d+)\s+Celsius', line)
-            if m:
-                temp = m.group(1)
-        elif line.startswith("Percentage Used:"):
-            m = re.search(r'(\d+)%', line)
-            if m:
-                used = int(m.group(1))
-                health_pct = 100 - used
-        elif line.startswith("Data Units Read:"):
-            m = re.search(r'\[(.*?)\]', line)
-            if m:
-                read_tb_str = m.group(1)
-        elif line.startswith("Data Units Written:"):
-            m = re.search(r'\[(.*?)\]', line)
-            if m:
-                written_tb_str = m.group(1)
-        elif line.startswith("Power On Hours:"):
-            val = line.split(":", 1)[1].strip().replace(",", "").replace(".", "")
-            m = re.search(r'(\d+)', val)
-            if m:
-                poh = int(m.group(1))
-        elif "SMART overall-health self-assessment result:" in line:
-            status = line.split(":", 1)[1].strip()
-
-    # Calculate Write/Day and Est Life
-    write_val_tb = 0.0
-    m_w = re.match(r'([0-9.]+)\s*([A-Z]+)', written_tb_str)
-    if m_w:
-        val, unit = m_w.groups()
-        val = float(val)
-        if unit == 'TB':
-            write_val_tb = val
-        elif unit == 'GB':
-            write_val_tb = val / 1024.0
-
-    poh_days = poh / 24.0
-    if poh_days > 0:
-        write_day_gb = (write_val_tb * 1024.0) / poh_days
-        write_day_str = f"{write_day_gb:.2f} GB"
-    else:
-        write_day_str = "0.00 GB"
-
-    used_pct = 100 - health_pct
-    if used_pct > 0:
-        years_active = poh / 8760.0
-        est_life_val = (years_active * (100.0 - used_pct)) / used_pct
-        est_life = f"{est_life_val:.2f} Years"
-    else:
-        est_life = ">10 Years"
-
-    # Status Code
-    code = 0
-    if health_pct <= 80:
-        code = 2
-    elif health_pct <= 90:
-        code = 1
-
-    desc = f"Status : OK ❘ Model: {model} ({capacity_str}) ❘ Status: {status} ❘ Temp: {temp}C ❘ Health: {health_pct}% ❘ Read: {read_tb_str} ❘ Written: {written_tb_str} ❘ Write/Day: {write_day_str} ❘ Est. Life: {est_life}"
-    if code == 1:
-        desc = desc.replace("Status : OK ❘", "Status : WARNING ❘")
-    elif code == 2:
-        desc = desc.replace("Status : OK ❘", "Status : CRITICAL ❘")
-
-    return code, desc
-
-def get_sata_info(dev_path, dev_name):
-    """Parse SATA health metrics for HDD and SSD."""
-    # 1. Run smartctl -i
-    try:
-        info_out = subprocess.check_output(["smartctl", "-i", dev_path], text=True, stderr=subprocess.DEVNULL)
-    except Exception:
-        return None
-        
-    model = "Unknown SATA"
-    capacity_str = "Unknown Capacity"
-    is_ssd = True  # Default to SSD if undetermined
-    
-    for line in info_out.splitlines():
-        line = line.strip()
-        if line.startswith("Device Model:") or line.startswith("Model Family:"):
-            if "Device Model:" in line:
-                model = line.split(":", 1)[1].strip()
-            elif model == "Unknown SATA" and "Model Family:" in line:
-                model = line.split(":", 1)[1].strip()
-        elif line.startswith("User Capacity:"):
-            cap_parts = line.split(":", 1)[1].strip()
-            # e.g., "120,034,123,456 bytes [120 GB]"
-            m = re.search(r'\[(.*?)\]', cap_parts)
-            if m:
-                capacity_str = m.group(1)
-        elif "Rotation Rate:" in line:
-            rot = line.split(":", 1)[1].strip().lower()
-            if "solid state" in rot or "non-rotational" in rot:
+        # Parse Device Type (Rotation Rate / SSD indicator)
+        if line_strip.startswith("Rotation Rate:"):
+            rotation_rate = line_strip.split(":", 1)[1].strip()
+            if "Solid State" in rotation_rate or "SSD" in rotation_rate:
                 is_ssd = True
-            elif "rpm" in rot or "spinning" in rot:
-                is_ssd = False
-
-    # 2. Run smartctl -H
-    try:
-        health_out = subprocess.check_output(["smartctl", "-H", dev_path], text=True, stderr=subprocess.DEVNULL)
-    except Exception:
-        health_out = ""
-        
-    status = "PASSED"
-    for line in health_out.splitlines():
-        if "test result:" in line.lower() or "self-assessment result:" in line.lower():
-            status = line.split(":", 1)[1].strip()
-
-    # 3. Run smartctl -A to gather raw attributes
-    try:
-        attr_out = subprocess.check_output(["smartctl", "-A", dev_path], text=True, stderr=subprocess.DEVNULL)
-    except Exception:
-        attr_out = ""
-        
-    attrs = {}
-    for line in attr_out.splitlines():
-        parts = line.split()
-        if parts and parts[0].isdigit():
-            attr_id = int(parts[0])
-            name = parts[1]
-            raw_val = parts[-1]
-            attrs[attr_id] = (name, raw_val)
-
-    # Common Attribute Extraction
-    poh = 0
-    if 9 in attrs:
-        m = re.search(r'(\d+)', attrs[9][1])
-        if m:
-            poh = int(m.group(1))
-            
-    temp = "N/A"
-    if 194 in attrs:
-        m = re.search(r'(\d+)', attrs[194][1])
-        if m:
-            temp = m.group(1)
-    elif 190 in attrs:
-        m = re.search(r'(\d+)', attrs[190][1])
-        if m:
-            temp = m.group(1)
-
-    if is_ssd:
-        # ==========================================
-        # SSD LOGIC (SATA SSD)
-        # ==========================================
-        health_pct = 100
-        # Check SSD health/life attributes (ID 231, 233, or 169)
-        if 231 in attrs:
-            m = re.search(r'(\d+)', attrs[231][1])
-            if m:
-                health_pct = int(m.group(1))
-        elif 233 in attrs:
-            m = re.search(r'(\d+)', attrs[233][1])
-            if m:
-                health_pct = int(m.group(1))
-        elif 169 in attrs: # Sometimes used for SandForce remaining life
-            m = re.search(r'(\d+)', attrs[169][1])
-            if m:
-                health_pct = int(m.group(1))
-
-        # Check raw bytes calculations
-        write_raw = 0
-        read_raw = 0
-        write_name = ""
-        read_name = ""
-        
-        if 241 in attrs:
-            write_name = attrs[241][0]
-            try:
-                write_raw = int(re.search(r'(\d+)', attrs[241][1]).group(1))
-            except Exception:
-                pass
-        if 242 in attrs:
-            read_name = attrs[242][0]
-            try:
-                read_raw = int(re.search(r'(\d+)', attrs[242][1]).group(1))
-            except Exception:
-                pass
-
-        def calculate_bytes(raw_val, attr_name, model_name):
-            if raw_val <= 0:
-                return 0.0
-            
-            attr_name_lower = attr_name.lower()
-            model_lower = model_name.lower()
-            
-            # Check 1: Explicitly labeled blocks/units in name
-            if "32mib" in attr_name_lower:
-                return raw_val * 32.0 * 1024.0 * 1024.0
-            elif "gb" in attr_name_lower:
-                return raw_val * (10**9)
-            elif "gib" in attr_name_lower:
-                return raw_val * (2**30)
-            elif "sectors" in attr_name_lower:
-                return raw_val * 512.0
-                
-            # Check 2: LBA Named but behaves as GB / Sectors
-            if "lba" in attr_name_lower:
-                if "samsung" in model_lower:
-                    # Samsung drives use real 512B sectors for ID 241
-                    return raw_val * 512.0
-                else:
-                    # Non-Samsung (Apacer CS900, PNY, V-Gen, Phison, SMI, etc.)
-                    # If raw value is very large, e.g. > 50 million, it's sectors.
-                    # If it's small, it represents GB!
-                    if raw_val > 50000000:
-                        return raw_val * 512.0
-                    else:
-                        return raw_val * (10**9)
-            
-            # Check 3: Default to GB if small, sectors if huge
-            if raw_val > 50000000:
-                return raw_val * 512.0
             else:
-                return raw_val * (10**9)
+                is_ssd = False # HDD
+                
+        # Parse NVMe Indicator from text
+        if "NVM Express" in line_strip or "NVMe" in line_strip or "Total NVM Capacity" in line_strip or "Model Number" in line_strip:
+            is_nvme = True
+            
+        # Parse SMART status
+        if "SMART overall-health self-assessment test result:" in line_strip:
+            smart_status = line_strip.split(":", 1)[1].strip()
+        elif "SMART overall-health self-assessment test result" in line_strip:
+            parts = line_strip.split()
+            if parts:
+                smart_status = parts[-1]
+                
+        # Parse SATA Attributes
+        match = re.match(r'^\s*(\d+)\s+([a-zA-Z0-9_-]+)\s+', line)
+        if match:
+            attr_id = int(match.group(1))
+            attr_name = match.group(2)
+            rest = line[match.end():]
+            dash_match = re.search(r'-\s+(\d+)', rest)
+            if dash_match:
+                raw_val = int(dash_match.group(1))
+            else:
+                clean_rest = re.sub(r'\(.*\)', '', rest)
+                nums = re.findall(r'\d+', clean_rest)
+                raw_val = int(nums[-1]) if nums else 0
+            attributes[attr_id] = (attr_name, raw_val)
 
-        write_val_bytes = calculate_bytes(write_raw, write_name, model)
-        read_val_bytes = calculate_bytes(read_raw, read_name, model)
-        
-        read_tb_val = read_val_bytes / (10**12)
-        written_tb_val = write_val_bytes / (10**12)
-        
-        read_tb_str = f"{read_tb_val:.1f} TB"
-        written_tb_str = f"{written_tb_val:.1f} TB"
-        
-        # Power on days calculation
-        poh_days = poh / 24.0
-        if poh_days > 0:
-            write_day_gb = (write_val_bytes / (10**9)) / poh_days
-            write_day_str = f"{write_day_gb:.2f} GB"
-        else:
-            write_day_str = "0.00 GB"
-            
-        used_pct = 100 - health_pct
-        if used_pct > 0:
-            years_active = poh / 8760.0
-            est_life_val = (years_active * (100.0 - used_pct)) / used_pct
-            est_life = f"{est_life_val:.2f} Years"
-        else:
-            est_life = ">10 Years"
-            
-        code = 0
-        if health_pct <= 80:
-            code = 2
-        elif health_pct <= 90:
-            code = 1
-            
-        desc = f"Status : OK ❘ Model: {model} ({capacity_str}) ❘ Status: {status} ❘ Temp: {temp}C ❘ Health: {health_pct}% ❘ Read: {read_tb_str} ❘ Written: {written_tb_str} ❘ Write/Day: {write_day_str} ❘ Est. Life: {est_life}"
-        if code == 1:
-            desc = desc.replace("Status : OK ❘", "Status : WARNING ❘")
-        elif code == 2:
-            desc = desc.replace("Status : OK ❘", "Status : CRITICAL ❘")
-            
-        return code, desc
-
+    # Determine type string
+    if is_nvme:
+        disk_type = "NVME"
+    elif is_ssd:
+        disk_type = "SSD Sata"
     else:
-        # ==========================================
-        # HDD LOGIC (SATA HDD)
-        # ==========================================
-        # Hard disks care about: Reallocated_Sector_Ct (5), Current_Pending_Sector_Ct (197), Offline_Uncorrectable (198)
-        reallocated = 0
-        if 5 in attrs:
-            try:
-                reallocated = int(re.search(r'(\d+)', attrs[5][1]).group(1))
-            except Exception:
-                pass
-                
-        pending = 0
-        if 197 in attrs:
-            try:
-                pending = int(re.search(r'(\d+)', attrs[197][1]).group(1))
-            except Exception:
-                pass
-                
-        offline_uncorrectable = 0
-        if 198 in attrs:
-            try:
-                offline_uncorrectable = int(re.search(r'(\d+)', attrs[198][1]).group(1))
-            except Exception:
-                pass
-                
-        # Determine status code and message based on bad sectors
-        code = 0
-        disk_remark = "Disk Condition Good"
+        disk_type = "HDD"
         
-        if status.upper() != "PASSED" or reallocated >= 50 or pending > 10 or offline_uncorrectable > 0:
-            code = 2
-            disk_remark = "Please check Harddisk, bad sectors detected!"
-        elif reallocated > 0 or pending > 0:
-            code = 1
-            disk_remark = "Warning, some bad sectors detected. Keep monitor!"
+    # Extract Temp, POH, Smart Status
+    # Temperature (ID 194 or ID 190 for SATA, or "Temperature:" for NVMe)
+    temp = 0
+    if 194 in attributes:
+        temp = attributes[194][1]
+    elif 190 in attributes:
+        temp = attributes[190][1]
+    else:
+        temp_match = re.search(r'Temperature:\s+(\d+)\s+Celsius', text, re.IGNORECASE)
+        if temp_match:
+            temp = int(temp_match.group(1))
+        else:
+            temp_match2 = re.search(r'Temperature:\s+(\d+)', text, re.IGNORECASE)
+            if temp_match2:
+                temp = int(temp_match2.group(1))
+                
+    # Power On Hours (ID 9 for SATA, or "Power On Hours:" for NVMe)
+    poh = 0
+    if 9 in attributes:
+        poh = attributes[9][1]
+    else:
+        poh_match = re.search(r'Power\s+On\s+Hours:\s+([\d,]+)', text, re.IGNORECASE)
+        if poh_match:
+            poh = int(poh_match.group(1).replace(",", ""))
             
-        desc = f"Status : {'OK' if code == 0 else ('WARNING' if code == 1 else 'CRITICAL')} ❘ Model: {model} ({capacity_str}) ❘ Status: {status} ❘ Temp: {temp}C ❘ Disk Type: HDD ❘ Reallocated Sectors: {reallocated} ❘ Pending Sectors: {pending} ❘ Power On Hours: {poh} Hrs ❘ Remark: {disk_remark}"
-        return code, desc
+    # Model cleaning
+    model_clean = model.strip()
+    
+    # Capacity fallback if cap_bracket is Unknown
+    if cap_bracket == "Unknown" and capacity_bytes > 0:
+        gb = capacity_bytes / (1000 ** 3)
+        if gb >= 900:
+            cap_bracket = f"{gb / 1000.0:.2f} TB"
+        else:
+            cap_bracket = f"{int(round(gb))} GB"
+
+    # Status word and code based on health/SMART
+    status_code = 0
+    status_word = "OK"
+    
+    if disk_type in ["NVME", "SSD Sata"]:
+        # Extract health
+        health = 100
+        if is_nvme:
+            percent_used_match = re.search(r'Percentage\s+Used:\s+(\d+)', text, re.IGNORECASE)
+            if percent_used_match:
+                health = 100 - int(percent_used_match.group(1))
+        else:
+            if 231 in attributes:
+                health = attributes[231][1]
+            elif 202 in attributes:
+                health = attributes[202][1]
+            elif 169 in attributes:
+                health = attributes[169][1]
+                
+        # Check alerts based on standarisasi
+        if health <= 80:
+            status_code = 2
+            status_word = "CRITICAL"
+        elif health <= 90:
+            status_code = 1
+            status_word = "WARNING"
+            
+        # SMART status check
+        if smart_status != "PASSED":
+            status_code = 2
+            status_word = "CRITICAL"
+            
+        # Extract Reads and Writes
+        read_tb = 0.0
+        write_tb = 0.0
+        
+        if is_nvme:
+            # Data Units Read/Written are in 512,000 byte units or printed in TB
+            # Search for TB in bracket
+            read_match = re.search(r'Data\s+Units\s+Read:\s+[\d,]+\s+\[([\d.]+)\s+TB\]', text, re.IGNORECASE)
+            if read_match:
+                read_tb = float(read_match.group(1))
+            else:
+                read_raw_match = re.search(r'Data\s+Units\s+Read:\s+([\d,]+)', text, re.IGNORECASE)
+                if read_raw_match:
+                    raw_read = int(read_raw_match.group(1).replace(",", ""))
+                    read_tb = raw_read * 512000 / (10**12)
+                    
+            write_match = re.search(r'Data\s+Units\s+Written:\s+[\d,]+\s+\[([\d.]+)\s+TB\]', text, re.IGNORECASE)
+            if write_match:
+                write_tb = float(write_match.group(1))
+            else:
+                write_raw_match = re.search(r'Data\s+Units\s+Written:\s+([\d,]+)', text, re.IGNORECASE)
+                if write_raw_match:
+                    raw_write = int(write_raw_match.group(1).replace(",", ""))
+                    write_tb = raw_write * 512000 / (10**12)
+        else:
+            # SATA SSD
+            write_attr = attributes.get(241)
+            read_attr = attributes.get(242)
+            raw_write = write_attr[1] if write_attr else 0
+            raw_read = read_attr[1] if read_attr else 0
+            
+            # Heuristic for GB vs Sector Scale
+            is_gb_scale = any(brand in model.upper() for brand in ["APACER", "CS900", "V-GEN", "PATRIOT", "ADATA", "KINGMAX", "PHISON", "SMI", "SILICON MOTION"])
+            if raw_write < 5000000 and poh > 100 and (raw_write / (poh + 1)) > 0.01:
+                is_gb_scale = True
+                
+            if is_gb_scale:
+                write_tb = raw_write / 1000.0
+                read_tb = raw_read / 1000.0
+            else:
+                write_tb = raw_write * 512 / (10**12)
+                read_tb = raw_read * 512 / (10**12)
+                
+        # Calculate Write/Day
+        days_active = poh / 24.0
+        if days_active > 0:
+            write_day_gb = (write_tb * 1000.0) / days_active
+        else:
+            write_day_gb = 0.0
+            
+        # Calculate Est. Life
+        percentage_used = 100 - health
+        if percentage_used == 0:
+            est_life = ">10 Years"
+        else:
+            years_active = poh / 8760.0
+            est_life_years = years_active * (health / percentage_used)
+            if est_life_years > 10:
+                est_life = ">10 Years"
+            else:
+                est_life = f"{est_life_years:.2f} Years"
+                
+        # Format output string
+        output_line = f'{status_code} "Storage Health ({model_clean})" - Status : {status_word} ❘ Type: {disk_type} ({cap_bracket}) ❘ Status: {smart_status} ❘ Temp: {temp}C ❘ Health: {health}% ❘ Read: {read_tb:.1f} TB ❘ Written: {write_tb:.1f} TB ❘ Write/Day: {write_day_gb:.2f} GB ❘ Est. Life: {est_life}'
+    else:
+        # HDD Sata
+        reallocated = attributes.get(5)[1] if attributes.get(5) else 0
+        pending = attributes.get(197)[1] if attributes.get(197) else 0
+        
+        remark = "Disk Condition Good"
+        if smart_status != "PASSED" or reallocated >= 50 or pending > 10:
+            status_code = 2
+            status_word = "CRITICAL"
+            remark = "Critical, bad sectors or SMART failed!"
+        elif reallocated > 0 or pending > 0:
+            status_code = 1
+            status_word = "WARNING"
+            remark = "Warning, some bad sectors detected. Keep monitor!"
+            
+        rot_rate_clean = rotation_rate.replace(" ", "").replace("RPM", "rpm")
+        
+        # Format output string for HDD
+        output_line = f'{status_code} "Storage Health ({model_clean})" - Status : {status_word} ❘ Type: HDD ({cap_bracket}) ❘ Status: {smart_status} ❘ Temp: {temp}C ❘ Rotation Rate: {rot_rate_clean} | Realocated Sector: {reallocated}❘ Power On Hours: {poh} Hrs ❘ Remark: {remark}'
+        
+    return output_line
+
+def get_block_devices():
+    devices = []
+    # Find SATA disks
+    for path in glob.glob('/sys/block/sd*'):
+        dev = '/dev/' + os.path.basename(path)
+        devices.append(dev)
+    # Find NVMe namespaces
+    for path in glob.glob('/sys/block/nvme*n*'):
+        dev = '/dev/' + os.path.basename(path)
+        devices.append(dev)
+    return sorted(devices)
 
 def main():
-    if not check_smartctl_installed():
-        print("3 \"Storage Health\" - Error: smartctl is not installed on this system.")
+    if not shutil.which('smartctl'):
+        print("3 \"Storage Health\" - UNKNOWN: smartctl is not installed on this system.")
         sys.exit(0)
         
-    devices = scan_devices()
+    devices = get_block_devices()
     if not devices:
-        print("0 \"Storage Health\" - No block devices detected.")
+        print("0 \"Storage Health\" - Status : OK ❘ No storage devices detected.")
         sys.exit(0)
         
-    for dev_path, dev_name, dev_type in devices:
-        # Determine if NVMe or SATA
-        if dev_type == "nvme" or "nvme" in dev_name:
-            res = get_nvme_info(dev_path, dev_name)
-        else:
-            res = get_sata_info(dev_path, dev_name)
-            
-        if res:
-            code, desc = res
-            # Emit in Checkmk Local Check format
-            print(f"{code} \"Storage Health {dev_name}\" - {desc}")
+    for dev in devices:
+        raw_out = run_smartctl(dev)
+        if not raw_out:
+            continue
+        # Skip if not a valid SMART-capable disk
+        if "Device Model:" not in raw_out and "Model Number:" not in raw_out:
+            continue
+        try:
+            line = parse_smartctl_output(raw_out, dev)
+            print(line)
+        except Exception as e:
+            # Fallback if parsing fails to avoid breaking checkmk entirely
+            print(f'3 "Storage Health ({os.path.basename(dev)})" - UNKNOWN: Error parsing SMART data: {str(e)}')
 
 if __name__ == "__main__":
     main()
