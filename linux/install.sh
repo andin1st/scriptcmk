@@ -12,7 +12,7 @@ fi
 
 # Default variables
 SERVER_IP=""
-SITE_ID="monitoring"
+SITE_ID="cmk"
 AGENT_VERSION="2.5.0p9-1"
 GITHUB_REPO="andin1st/scriptcmk"
 GITHUB_BRANCH="main"
