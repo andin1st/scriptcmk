@@ -104,10 +104,10 @@ if need_update "$CACHE_FILE" "$LAST_16"; then
             status_txt="Warning"
         fi
         
-        echo "$status \"Battery_Health\" - Status : $status_txt ❘ Health: ${health}% ❘ Cycle: $cycle ❘ State: $state" >> "$CACHE_FILE"
+        echo "$status \"Health_Battery\" - Status : $status_txt ❘ Health: ${health}% ❘ Cycle: $cycle ❘ State: $state" >> "$CACHE_FILE"
     else
         # Jika PC Desktop / Tidak ada baterai
-        echo "0 \"Battery_Health\" - Status : OK ❘ Device is PC/Desktop, there is no battery." >> "$CACHE_FILE"
+        echo "0 \"Health_Battery\" - Status : OK ❘ Device is PC/Desktop, there is no battery." >> "$CACHE_FILE"
     fi
 fi
 

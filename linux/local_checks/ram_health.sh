@@ -51,7 +51,7 @@ if need_update "$CACHE_FILE" "$LAST_SAT_11"; then
     
     if [ ! -f "$LOG_FILE" ]; then
         # If log file doesn't exist yet, assume OK state until scheduled run
-        echo "0 \"RAM_Health\" - Status : OK ❘ Result: Passed ❘ Tested Size: N/A ❘ Last Test: No test run yet ❘ Log: Waiting for first scheduled memtester run on Saturday 11:00 AM." >> "$CACHE_FILE"
+        echo "0 \"Health_RAM\" - Status : OK ❘ Result: Passed ❘ Tested Size: N/A ❘ Last Test: No test run yet ❘ Log: Waiting for first scheduled memtester run on Saturday 11:00 AM." >> "$CACHE_FILE"
     else
         # Read test results from log file
         status_line=$(grep "STATUS:" "$LOG_FILE" | tail -n 1)
@@ -81,7 +81,7 @@ if need_update "$CACHE_FILE" "$LAST_SAT_11"; then
             [ -z "$log_summary" ] && log_summary="Memory test failed during allocation or testing."
         fi
         
-        echo "$status_code \"RAM_Health\" - Status : $status_txt ❘ Result: $result_txt ❘ Tested Size: $sample_size ❘ Last Test: $formatted_time ❘ Log: $log_summary" >> "$CACHE_FILE"
+        echo "$status_code \"Health_RAM\" - Status : $status_txt ❘ Result: $result_txt ❘ Tested Size: $sample_size ❘ Last Test: $formatted_time ❘ Log: $log_summary" >> "$CACHE_FILE"
     fi
 fi
 
