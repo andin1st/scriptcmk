@@ -228,7 +228,7 @@ def parse_smartctl_output(text, device_name):
                 est_life = f"{est_life_years:.2f} Years"
                 
         # Format output string
-        output_line = f'{status_code} "Health_Storage ({model_clean})" - Status : {status_word} ❘ Type: {disk_type} ({cap_bracket}) ❘ Status: {smart_status} ❘ Temp: {temp}C ❘ Health: {health}% ❘ Read: {read_tb:.1f} TB ❘ Written: {write_tb:.1f} TB ❘ Write/Day: {write_day_gb:.2f} GB ❘ Est. Life: {est_life}'
+        output_line = f'{status_code} "Health_Storage ({model_clean})" - Status : {status_word} ❘ Type: {disk_type} ({cap_bracket}) ❘ Status: {smart_status} ❘ Temp: {temp}C ❘ Health: {health}% ❘ Read: {read_tb:.1f} TB ❘ Written: {write_tb:.1f} TB ❘ Write/Day: {write_day_gb:.2f} GB' 
     else:
         # HDD Sata
         reallocated = attributes.get(5)[1] if attributes.get(5) else 0
