@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# =============================================================================
+# ==============================================================================
 # Checkmk Agent Bootstrap Installer - v6 (Multi-Distro & Dynamic Config)
 # Supports: Debian/Ubuntu (.deb) and Fedora/RHEL/Alma/Rocky (.rpm)
-# =============================================================================
+# ==============================================================================
 
 # Ensure script is run as root
 if [ "$EUID" -ne 0 ]; then
@@ -12,14 +12,14 @@ fi
 
 # Default variables
 SERVER_IP=""
-SITE_ID="monitoring"
+SITE_ID="cmk"
 AGENT_VERSION="2.5.0p9-1"
 GITHUB_REPO="andin1st/scriptcmk"
 GITHUB_BRANCH="main"
 
 # Help message
 show_help() {
-    echo "Penggunaan: sudo bash install.sh [OPSI]"
+    echo "Penggunaan: sudo bash install-v6.sh [OPSI]"
     echo ""
     echo "OPSI:"
     echo "  -s, --server IP/HOST      IP atau Hostname server Checkmk"
@@ -47,6 +47,7 @@ done
 # Interactive Mode if parameters are missing
 if [ -z "$SERVER_IP" ]; then
     echo -e "\e[34m=== Konfigurasi Server Checkmk ===\e[0m"
+    # Menggunakan < /dev/tty untuk mengatasi bug stdin pada curl | bash
     read -p "Masukkan IP Address atau Hostname Server Checkmk: " SERVER_IP < /dev/tty
     
     if [ -z "$SERVER_IP" ]; then
@@ -87,6 +88,7 @@ if [ "$OS_TYPE" = "debian" ]; then
     apt-get update -y
     apt-get install -y curl smartmontools memtester lm-sensors jq upower bc
 elif [ "$OS_TYPE" = "redhat" ]; then
+    # Di RHEL/CentOS/Fedora, epel-release mungkin diperlukan untuk memtester
     if [ "$PKG_MANAGER" = "dnf" ]; then
         dnf install -y epel-release 2>/dev/null || true
         dnf install -y curl smartmontools memtester lm_sensors jq upower bc
@@ -106,6 +108,7 @@ if [ "$OS_TYPE" = "debian" ]; then
     LOCAL_PATH="${TEMP_DIR}/${AGENT_FILE}"
     
     echo "Mengunduh: ${DOWNLOAD_URL}"
+    # Menggunakan -f untuk menggagalkan download jika 404
     if curl -sSfL -o "${LOCAL_PATH}" "${DOWNLOAD_URL}"; then
         echo -e "\e[32m[INFO] Menginstal Agen Checkmk (.deb)...\e[0m"
         dpkg -i "${LOCAL_PATH}" || apt-get install -f -y
@@ -114,6 +117,7 @@ if [ "$OS_TYPE" = "debian" ]; then
         exit 1
     fi
 elif [ "$OS_TYPE" = "redhat" ]; then
+    # Format RPM biasanya: check-mk-agent-2.5.0p9-1.noarch.rpm
     AGENT_FILE="check-mk-agent-${AGENT_VERSION}.noarch.rpm"
     DOWNLOAD_URL="http://${SERVER_IP}/${SITE_ID}/check_mk/agents/${AGENT_FILE}"
     LOCAL_PATH="${TEMP_DIR}/${AGENT_FILE}"
@@ -137,26 +141,16 @@ LOCAL_CHECKS_DIR="/usr/lib/check_mk_agent/local"
 mkdir -p "${LOCAL_CHECKS_DIR}"
 chmod 755 "${LOCAL_CHECKS_DIR}"
 
-# Download Local Checks from GitHub (10 suite scripts)
+# Download Local Checks from GitHub
 echo -e "\e[32m[INFO] Mengunduh script local checks kustom dari GitHub...\e[0m"
-SCRIPTS=(
-    "battery_health.sh"
-    "cpu_info.sh"
-    "disk_nvme_health.sh"
-    "fan_health.sh"
-    "info_network.sh"
-    "info_OS_office.sh"
-    "ram_health.sh"
-    "ram_usage.sh"
-    "remote_apps.sh"
-    "storage_usage.sh"
-)
+SCRIPTS=("fan_health.sh" "cpu_info.sh" "info_OS_office.sh" "ram_health.sh" "disk_nvme_health.sh" "remote_apps.sh" "battery_health.sh" "ram_usage.sh" "storage_usage.sh" "info_network.sh")
 
 for script in "${SCRIPTS[@]}"; do
     SCRIPT_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/linux/local_checks/${script}"
     TARGET_PATH="${LOCAL_CHECKS_DIR}/${script}"
     
     echo "Mengunduh: ${script}..."
+    # Gunakan -f agar tidak mengunduh halaman 404
     if curl -sSfL -o "${TARGET_PATH}" "${SCRIPT_URL}"; then
         chmod +x "${TARGET_PATH}"
         echo -e "\e[32m[SUCCESS] Berhasil memasang ${script}\e[0m"
@@ -180,7 +174,7 @@ cat << 'EOF' > "${RUNNER_PATH}"
 # Script Runner Memtester Asinkron - Menghitung 20% Free RAM & Menjalankan Tes
 
 LOG_DIR="/var/log/checkmk_custom"
-LOG_FILE="/var/log/checkmk_custom/memtester_health.log"
+LOG_FILE="${LOG_DIR}/memtester_health.log"
 mkdir -p "$LOG_DIR"
 
 echo "=== MEMTESTER START: $(date) ===" > "$LOG_FILE"
@@ -210,8 +204,8 @@ EOF
 
 chmod +x "${RUNNER_PATH}"
 
-# Setup Cron Job (Dijalankan setiap hari SAKTU pukul 11:00 Siang)
-CRON_JOB="0 11 * * 6 ${RUNNER_PATH} >/dev/null 2>&1"
+# Setup Cron Job (Dijalankan setiap tanggal 1 dan 15 pukul 02:00 pagi)
+CRON_JOB="0 2 1,15 * * ${RUNNER_PATH} >/dev/null 2>&1"
 (crontab -l 2>/dev/null | grep -Fv "${RUNNER_PATH}"; echo "${CRON_JOB}") | crontab -
 
 # Jalankan pengujian pertama kali di background agar langsung ada data log awal
@@ -220,6 +214,6 @@ nohup "${RUNNER_PATH}" >/dev/null 2>&1 &
 
 echo -e "\e[32m===================================================\e[0m"
 echo -e "\e[32m[SUCCESS] Instalasi Agen Checkmk Selesai!\e[0m"
-echo -e "\e[32mClient telah terdaftar di Cron Scheduler (Setiap Sabtu 11:00 AM).\e[0m"
+echo -e "\e[32mClient telah terdaftar di Cron Scheduler.\e[0m"
 echo -e "\e[32mPastikan untuk mendaftarkan host ini di server Checkmk Anda.\e[0m"
 echo -e "\e[32m===================================================\e[0m"
