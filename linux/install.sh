@@ -23,7 +23,7 @@ show_help() {
     echo ""
     echo "OPSI:"
     echo "  -s, --server IP/HOST      IP atau Hostname server Checkmk"
-    echo "  -d, --site SITE_ID        Site ID Checkmk (Default: monitoring)"
+    echo "  -d, --site SITE_ID        Site ID Checkmk (Default: cmk)"
     echo "  -v, --version VERSION     Versi Agen Checkmk (Default: 2.5.0p9-1)"
     echo "  -g, --github REPO         Repositori GitHub kustom (Format: user/repo)"
     echo "  -b, --branch BRANCH       Branch GitHub (Default: main)"
