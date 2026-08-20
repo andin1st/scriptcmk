@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 # =====================================================================
-# Local Check Checkmk: Weekly OS & Office (LibreOffice + WPS + Onlyoffice) Check
+# Local Check Checkmk: Daily OS & Office (LibreOffice + WPS + Onlyoffice) Check (16:00)
 # =====================================================================
 CACHE_DIR="/var/lib/check_mk_agent/cache"
 mkdir -p "$CACHE_DIR" 2>/dev/null
 
-NOW=$(date +%s)
-DOW=$(date +%u) # 1=Senin, ..., 7=Minggu
-DAYS_SINCE_MON=$(( DOW - 1 ))
-THIS_MONDAY=$(date -d "today - $DAYS_SINCE_MON days 00:00:00" +%s 2>/dev/null)
+# --- LOGIKA PENJADWALAN UPDATE 16:00 ---
+CURRENT_HOUR=$(date +%H)
+
+if [ "$CURRENT_HOUR" -ge 16 ]; then
+    # Jika sekarang pukul 16:00 atau lebih, batas waktu adalah hari ini pukul 16:00
+    LAST_SCHEDULE=$(date -d "today 16:00:00" +%s 2>/dev/null)
+else
+    # Jika sekarang sebelum pukul 16:00, batas waktu adalah kemarin pukul 16:00
+    LAST_SCHEDULE=$(date -d "yesterday 16:00:00" +%s 2>/dev/null)
+fi
+
 OS_OFFICE_CACHE="$CACHE_DIR/cache_os_office_info.txt"
 
 need_update() {
@@ -18,7 +25,8 @@ need_update() {
     if [ "$file_ts" -lt "$schedule_ts" ]; then return 0; else return 1; fi
 }
 
-if need_update "$OS_OFFICE_CACHE" "$THIS_MONDAY"; then
+# --- PROSES CEK DAN UPDATE CACHE ---
+if need_update "$OS_OFFICE_CACHE" "$LAST_SCHEDULE"; then
     > "$OS_OFFICE_CACHE"
     
     # Generate timestamp
@@ -126,4 +134,6 @@ if need_update "$OS_OFFICE_CACHE" "$THIS_MONDAY"; then
         echo "0 \"Info_Office\" - OK - Product: Tidak ada aplikasi Office (Native Linux) ❘ Checked At: $TIMESTAMP" >> "$OS_OFFICE_CACHE"
     fi
 fi
+
+# Cetak hasil dari cache
 cat "$OS_OFFICE_CACHE" 2>/dev/null
