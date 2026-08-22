@@ -11,19 +11,18 @@ andin1st/scriptcmk/
 ├── .gitignore
 ├── README.md
 ├── linux/
-│   ├── install.sh                       # Skrip installer otomatis Linux Host (v6)
+│   ├── install.sh                       # Skrip installer otomatis Linux Host (Multi-Distro, Default Site: cmk)
 │   └── local_checks/
-│       ├── battery_health.sh            # 1. Monitoring kesehatan baterai laptop
-│       ├── cpu_info.sh                  # 2. Detail spesifikasi, clock, load & suhu CPU
-│       ├── cpu_os_info.sh               # 3. Skrip gabungan legacy CPU & OS
-│       ├── disk_nvme_health.sh          # 4. Kesehatan SSD NVMe/SATA & HDD (Unified)
-│       ├── fan_health.sh                # 5. Monitoring kec. kipas vs suhu CPU
-│       ├── onlyoffice_info.sh           # 6. Deteksi status & versi Onlyoffice (Terpisah)
-│       ├── OS_info.sh                   # 7. Informasi distro OS & kernel Linux
-│       ├── ram_health.sh                # 8. Log reader pengujian RAM memtester
-│       ├── ram_usage.sh                 # 9. Kapasitas & persentase penggunaan RAM
-│       ├── remote_apps.sh               # 10. Deteksi ID Remote (AnyDesk & RustDesk)
-│       └── storage_usage.sh             # 11. Kapasitas partisi penyimpanan aktif
+│       ├── battery_health.sh            # 1. Monitoring kesehatan baterai laptop (Pukul 16:00)
+│       ├── cpu_info.sh                  # 2. Detail spesifikasi, clock, load & suhu CPU (Real-Time)
+│       ├── disk_nvme_health.sh          # 3. Kesehatan SSD NVMe/SATA & HDD (Unified, Pukul 16:00)
+│       ├── fan_health.sh                # 4. Monitoring kec. kipas vs suhu CPU (Real-Time)
+│       ├── info_network.sh              # 5. Real-time network throughput, RX/TX rate, & IP info (Real-Time)
+│       ├── info_OS_office.sh            # 6. Detail distro OS & versi Office terpasang (Pukul 16:00)
+│       ├── ram_health.sh                # 7. Log reader pengujian RAM memtester (Sabtu 11:00)
+│       ├── ram_usage.sh                 # 8. Kapasitas & persentase penggunaan RAM (Real-Time)
+│       ├── remote_apps.sh               # 9. Deteksi ID Remote AnyDesk & RustDesk (Pukul 16:00)
+│       └── storage_usage.sh             # 10. Kapasitas partisi penyimpanan aktif (Pukul 16:00)
 └── windows/
     ├── install.ps1                      # Skrip installer otomatis Windows Host
     └── local_checks/
@@ -45,141 +44,126 @@ andin1st/scriptcmk/
 
 Gunakan skrip bootstrap satu baris (*one-liner*) berikut untuk melakukan pemasangan otomatis agen Checkmk, konfigurasi dependensi, dan sinkronisasi seluruh skrip *local checks*.
 
-#### **1. Mode Interaktif (Manual)**
+#### **1. Mode Instan Standar (Otomatis)**
 ```bash
 curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install.sh | sudo bash
 ```
 
-#### **2. Mode Instan Skala Massal (Non-Interaktif)**
+#### **2. Mode Skala Massal Non-Interaktif**
 Sangat ideal digunakan bersama Ansible, Puppet, SSH Loop, atau skrip otomatisasi deployment Anda:
 ```bash
 curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install.sh | sudo bash -s -- \
-  -s 192.168.1.100 \
-  -d mysite \
+  -s 192.168.43.100 \
+  -d cmk \
   -v 2.5.0p9 \
   -g andin1st/scriptcmk
 ```
 
 **Detail Parameter CLI:**
-*   `-s` : IP Address atau Domain Server Checkmk (Contoh: `192.168.1.100`).
-*   `-d` : Nama Instansi / Site ID Checkmk Server (Contoh: `mysite`).
-*   `-v` : Versi Agen Checkmk yang ingin dipasang (Contoh: `2.5.0p9`).
+*   `-s` : IP Address atau Domain Server Checkmk (Contoh: `192.168.43.100`).
+*   `-d` : Nama Instansi / Site ID Checkmk Server (Default: `cmk`).
+*   `-v` : Versi Agen Checkmk yang ingin dipasang (Default: `2.5.0p9-1`).
 *   `-g` : Target repositori GitHub kustom Anda (Default: `andin1st/scriptcmk`).
 
 ---
 
-## 📋 Detail 11 Skrip Monitoring Linux (`linux/local_checks/`)
+## ⏱️ Strategi Optimasi Beban Kerja (Caching & Scheduling)
+
+Demi menjaga performa CPU klien tetap optimal, suite ini memisahkan tugas pemantauan menjadi dua kategori:
+
+1. **Skrip Real-Time (Eksekusi Instan)**:
+   Dijalankan langsung setiap kali server melakukan *polling* (biasanya setiap 1 menit) karena metrik ini bersifat sangat dinamis.
+   * *Skrip*: `cpu_info.sh`, `fan_health.sh`, `ram_usage.sh`, `info_network.sh`.
+
+2. **Skrip Terjadwal (Daily Cache pukul 16:00)**:
+   Metrik ini hanya berfluktuasi sedikit dalam sehari. Skrip ini menggunakan **Mesin Caching Mandiri Terjadwal** yang melakukan pemindaian perangkat keras fisik hanya **sekali dalam sehari setelah pukul 16:00**. Pada pemanggilan di luar jam tersebut, skrip langsung menyajikan data dari cache lokal (`/var/lib/check_mk_agent/cache/cache_*.txt`) dalam waktu kurang dari **1 milidetik** tanpa beban CPU sama sekali.
+   * *Skrip*: `battery_health.sh`, `disk_nvme_health.sh`, `info_OS_office.sh`, `remote_apps.sh`, `storage_usage.sh`.
+
+3. **Skrip Mingguan (Asinkron Sabtu pukul 11:00)**:
+   Pengujian kerusakan fisik RAM (`memtester`) sangat membebani CPU. Pengujian dijalankan secara asinkron lewat Cron Job **setiap hari Sabtu pukul 11:00 AM**. Skrip pembaca status hanya membaca berkas log statis tersebut secara instan.
+   * *Skrip*: `ram_health.sh`.
+
+---
+
+## 📋 Detail 10 Skrip Monitoring Linux (`linux/local_checks/`)
 
 Seluruh skrip monitoring menggunakan standar pemisahan visual **Unicode Light Vertical Bar (`❘` - U+2758)** agar laporan visual tampil sangat rapi di dashboard Checkmk dan kebal terhadap kegagalan *parsing* data kinerja (*performance data*).
 
 ### **1. battery_health.sh**
-*   **Fungsi**: Mendeteksi kesehatan baterai menggunakan subsistem `UPower` D-Bus. Jika dipasang pada PC Desktop, skrip secara cerdas melaporkan kondisi normal tanpa baterai.
-*   **Standardisasi Threshold**:
-    *   **OK (0)**: Kesehatan \(\ge 60\%\)
-    *   **Warning (1)**: Kesehatan \(\le 40\%\)
-    *   **Critical (2)**: Kesehatan \(\le 20\%\)
-*   **Format Output**:
+*   **Fungsi**: Mendeteksi kesehatan baterai menggunakan subsistem `UPower` D-Bus (dengan fallback ke `sysfs`). Membaca kapasitas desain, kapasitas saat ini, tingkat keausan, dan level baterai. Pada PC Desktop, otomatis melaporkan kondisi normal tanpa baterai.
+*   **Output (Laptop - Terdeteksi Baterai)**:
     ```text
-    0 "Battery_Health" - Status : OK ❘ Health: 94% ❘ Cycle: 45 ❘ State: fully-charged
+    0 "Health_Battery" -  Status Battery : Fully Charged ❘ Design Capacity : 35w/h ❘ Current Capacity : 10w/h ❘ Health : 28% ❘ Battery Level : 100%
+    ```
+*   **Output (PC Desktop / Server CLI)**:
+    ```text
+    0 "Health_Battery" -  Status Battery : N/A ❘ Device is PC/Desktop, there is no battery.
     ```
 
 ### **2. cpu_info.sh**
 *   **Fungsi**: Menampilkan detail spesifikasi prosesor real-time yang bersih dari logo dagang (`(R)`, `(TM)`, dll.), clock speed dinamis dalam GHz, rasio Core/Thread fisik, beban utilitas, serta sensor suhu hardware terarah (`CPUTIN`/`k10temp`).
-*   **Standardisasi Threshold**:
-    *   **OK (0)**: Suhu CPU \(\le 75^\circ\text{C}\)
-    *   **Warning (1)**: Suhu CPU \(> 75^\circ\text{C}\)
-    *   **Critical (2)**: Suhu CPU \(> 85^\circ\text{C}\) (Status kritis dipicu jika kipas bermasalah)
-*   **Format Output**:
+*   **Output**:
     ```text
-    0 "CPU_Info" - Spesifikasi : Intel Core i3 13100 | Clock Speed : 3.4Ghz | Core/Thread : 4/8 | CPU Load : 12% | CPU Temperature: 48 Celcius
+    0 "CPU_Info" - Spesifikasi : AMD Ryzen 5 5600H | Clock Speed : 3.3Ghz | Core/Thread : 6/12 | CPU Load : 15% | CPU Temperature: 46 Celcius
     ```
 
-### **3. cpu_os_info.sh**
-*   **Fungsi**: Skrip legacy terpadu yang menampilkan spesifikasi ringkas performa prosesor beriringan dengan detail sistem operasi host.
-*   **Format Output**:
+### **3. disk_nvme_health.sh**
+*   **Fungsi**: Mendeteksi secara dinamis tipe disk (SATA SSD, NVMe SSD, dan SATA HDD) dan menyesuaikan template laporan. SSD SATA didukung **Algoritma Heuristik Mandiri** untuk konversi LBA ke TBW pada pengontrol non-standar (Apacer, V-Gen, dll.) agar nilai baca/tulis tidak terbaca `0.0 TB`. HDD SATA secara otomatis dipantau dari parameter bad sector (Reallocated/Pending) dan jam aktif kerja. Metrik `Est. Life` telah dihapus sepenuhnya demi menyederhanakan laporan.
+*   **Output (SSD/NVMe)**:
     ```text
-    0 "CPU_OS_Info" - OS: Ubuntu 24.04 LTS ❘ CPU: AMD Ryzen 5 5600X ❘ Load: 8% ❘ Temp: 42C
+    0 "Storage Health (GEN01SM21AR1024ITNVME)" - Status : OK ❘ Type: NVME (1.00 TB) ❘ Status: PASSED ❘ Temp: 41C ❘ Health: 92% ❘ Read: 27.6 TB ❘ Written: 39.3 TB ❘ Write/Day: 153.40 GB
+    ```
+*   **Output (SATA HDD)**:
+    ```text
+    0 "Storage Health (ST1000LM035-1RK172)" - Status : OK ❘ Type: HDD (1.00 TB) ❘ Status: PASSED ❘ Temp: 31C ❘ Rotation Rate: 5400rpm | Realocated Sector: 0❘ Power On Hours: 12345 Hrs ❘ Remark: Disk Condition Good
     ```
 
-### **4. disk_nvme_health.sh (Unified)**
-*   **Fungsi**: Skrip berbasis Python terpadu untuk mendeteksi SSD NVMe, SSD SATA, dan SATA HDD secara otomatis. Dilengkapi dengan **Algoritma Heuristik Mandiri** untuk konversi LBA ke TBW pada SSD SATA kelas konsumen (seperti Apacer CS900) agar nilai baca/tulis tidak bernilai `0.0 TB`. Skrip ini juga beralih otomatis ke mode pelacakan bad sector khusus HDD.
-*   **Standardisasi Threshold (SSD/NVMe Health)**:
-    *   **OK (0)**: Kesehatan \(> 90\%\)
-    *   **Warning (1)**: Kesehatan \(\le 90\%\)
-    *   **Critical (2)**: Kesehatan \(\le 80\%\)
-*   **Format Output (SSD NVMe / SATA SSD)**:
-    ```text
-    0 "Storage_Health_sda" - Status : OK ❘ Model: CS900 SSD 120GB (111.79 GB) ❘ Status: PASSED ❘ Temp: 34C ❘ Health: 100% ❘ Read: 6.5 TB ❘ Written: 5.4 TB ❘ Write/Day: 108.64 GB ❘ Est. Life: >10 Years
-    ```
-*   **Format Output (SATA HDD - Deteksi Bad Sector & Power On Hours)**:
-    ```text
-    0 "Storage_Health_sdb" - Status : OK ❘ Model: ST1000LM035-1RK172 1TB (931.51 GB) ❘ Status: PASSED ❘ Temp: 31C ❘ Disk Type: HDD ❘ Reallocated Sectors: 0 ❘ Pending Sectors: 0 ❘ Power On Hours: 12345 Hrs ❘ Remark: Disk Condition Good
-    ```
-
-### **5. fan_health.sh**
+### **4. fan_health.sh**
 *   **Fungsi**: Membandingkan kecepatan putaran kipas pendingin (*fan speed*) secara dinamis dengan tingkat suhu prosesor untuk mengantisipasi kegagalan sistem pendingin aktif.
-*   **Standardisasi Threshold**:
-    *   **Critical (2)**: Suhu CPU \(> 85^\circ\text{C}\) dengan kipas \(< 1600\text{ RPM}\).
-    *   **Warning (1)**: Suhu CPU \(> 65^\circ\text{C}\) dengan kipas \(< 1000\text{ RPM}\).
-    *   **OK (0)**: Suhu CPU \(< 65^\circ\text{C}\) dengan kipas \(\ge 0\text{ RPM}\) (mendukung mode fanless/dingin).
-*   **Format Output**:
+*   **Output**:
     ```text
     0 "FAN_Health" - Status : OK | FAN Speed : 2319rpm | Remark: FAN Condition Good
     ```
 
-### **6. onlyoffice_info.sh (Terpisah)**
-*   **Fungsi**: Skrip mandiri khusus untuk mendeteksi status dan versi aplikasi Onlyoffice yang terinstal di komputer host. Mendukung pencarian dari paket lokal (`dpkg`, `rpm`), `flatpak`, dan `snap` (dengan perbaikan pencarian filter kustom).
-*   **Format Output (Terpasang)**:
+### **5. info_network.sh**
+*   **Fungsi**: Melacak statistik performa jaringan secara real-time. Skrip mengukur volume akumulatif data terunduh/terunggah serta menghitung kecepatan transfer RX/TX Rate sesungguhnya per detik (B/s, KB/s, MB/s) pada setiap kartu jaringan (*interface*) yang sedang aktif.
+*   **Output**:
     ```text
-    0 "Onlyoffice_Status" - Status : OK ❘ Version: Onlyoffice v7.2
-    ```
-*   **Format Output (Tidak Terpasang)**:
-    ```text
-    0 "Onlyoffice_Status" - Status : OK ❘ Onlyoffice tidak terpasang
+    0 "Info_Network_wlo1" in=122554432c|out=3586048c OK - IP Address: 192.168.43.33 | Total Download: 114.14 GB | Total Upload: 3.34 GB | RX Rate : 250.20 KB/s | TX Rate : 123.00 KB/s
     ```
 
-### **7. OS_info.sh**
-*   **Fungsi**: Menyediakan informasi detail mengenai distribusi sistem operasi Linux yang aktif beserta versi modul kernel yang digunakan.
-*   **Format Output**:
+### **6. info_OS_office.sh**
+*   **Fungsi**: Menyajikan rincian nama sistem operasi distribusi Linux, versi kernel, serta melakukan pendeteksian terintegrasi terhadap seluruh aplikasi office terpasang (LibreOffice, WPS Office, Onlyoffice), baik dari paket lokal, Snap, maupun Flatpak user/system level. Output dilengkapi penanda waktu (*timestamped*) dan terproteksi dari bug output teks error `rpm`.
+*   **Output**:
     ```text
-    0 "OS_Detail" - OS: Ubuntu 24.04.1 LTS, Kernel: 6.8.0-40-generic
+    0 "Info_OS" - OK - OS: Fedora Linux 44 (Workstation Edition) | Kernel: 7.1.5-201.fc44.x86_64 | Arch: x86_64 ❘ Checked At: 2026-08-13 16:00:00
+    0 "Info_Office" - OK - Product: LibreOffice 26.2.5.2 620(Build:2) + Onlyoffice v7.2.1 | Status: Native Linux Application ❘ Checked At: 2026-08-13 16:00:00
     ```
 
-### **8. ram_health.sh**
-*   **Fungsi**: Membaca file log lokal hasil pengujian modul memori RAM asinkron oleh utilitas `memtester` yang dipicu secara berkala setiap 2 minggu sekali via Cron Job.
-*   **Standardisasi Threshold**:
-    *   **OK (0)**: Log pengujian RAM bernilai `Passed`
-    *   **Critical (2)**: Log pengujian RAM bernilai `Failed` (mengindikasikan bad sector fisik pada keping RAM)
-*   **Format Output**:
+### **7. ram_health.sh**
+*   **Fungsi**: Membaca file log lokal hasil pengujian modul memori RAM asinkron oleh utilitas `memtester` yang dipicu terjadwal oleh Cron Job setiap hari Sabtu pukul 11:00 AM.
+*   **Output**:
     ```text
-    0 "RAM_Health" - Status : OK ❘ Result: Passed ❘ Last Test: 2026-08-10 03:00 ❘ Log: memtester passed successfully.
+    0 "RAM_Health" - Status : OK ❘ Result: Passed ❘ Tested Size: 1024M ❘ Last Test: 2026-08-15 11:00 ❘ Log: memtester passed successfully.
     ```
 
-### **9. ram_usage.sh**
+### **8. ram_usage.sh**
 *   **Fungsi**: Menampilkan kapasitas RAM terpasang, ruang bebas, sisa ruang kosong, dan persentase penggunaan RAM fisik real-time berbasis data `/proc/meminfo`.
-*   **Standardisasi Threshold**:
-    *   **OK (0)**: Utilisasi RAM \(< 85\%\)
-    *   **Warning (1)**: Utilisasi RAM \(\ge 85\%\)
-    *   **Critical (2)**: Utilisasi RAM \(\ge 95\%\)
-*   **Format Output**:
+*   **Output**:
     ```text
     0 "RAM_Usage" - Status : OK ❘ Used: 45% ❘ Used Space: 3.60 GB ❘ Free: 4.40 GB ❘ Total: 8.00 GB
     ```
 
-### **10. remote_apps.sh**
-*   **Fungsi**: Memindai ID unik untuk software remote support AnyDesk dan RustDesk yang aktif pada komputer client guna mempercepat kendali kendali tim helpdesk IT.
-*   **Format Output**:
+### **9. remote_apps.sh**
+*   **Fungsi**: Memindai ID unik untuk software remote support AnyDesk dan RustDesk yang aktif pada komputer client guna mempercepat kendali kendali tim helpdesk IT. (Logika pendeteksian Onlyoffice telah dihapus sepenuhnya dari berkas ini agar tidak terjadi redundansi karena sudah ditangani di `info_OS_office.sh`).
+*   **Output**:
     ```text
     0 "Remote_Apps" - Status : OK ❘ AnyDesk ID: 123456789 ❘ RustDesk ID: 987654321
     ```
 
-### **11. storage_usage.sh**
+### **10. storage_usage.sh**
 *   **Fungsi**: Memantau tingkat penggunaan kapasitas pada partisi aktif dan secara otomatis mengabaikan tipe sistem berkas virtual/semu (*pseudofilesystem*). Skrip ini adaptif sehingga aman digunakan pada host fisik, VPS (LXC), maupun dalam kontainer Docker.
-*   **Standardisasi Threshold**:
-    *   **OK (0)**: Penggunaan Storage \(< 85\%\)
-    *   **Warning (1)**: Penggunaan Storage \(\ge 85\%\)
-    *   **Critical (2)**: Penggunaan Storage \(\ge 95\%\)
-*   **Format Output**:
+*   **Output**:
     ```text
     0 "Storage_Usage_root" - Status : OK ❘ Partition: / ❘ Used: 42% ❘ Free: 139.20 GB ❘ Total: 240.00 GB
     ```
@@ -188,15 +172,24 @@ Seluruh skrip monitoring menggunakan standar pemisahan visual **Unicode Light Ve
 
 ## 🛠️ Ringkasan Matriks Standardisasi Threshold (Checkmk)
 
-| Parameter | OK (0) | Warning (1) | Critical (2) |
-| :--- | :--- | :--- | :--- |
-| **Suhu CPU** | \(\le 75^\circ\text{C}\) | \(> 75^\circ\text{C}\) | \(> 85^\circ\text{C}\) |
-| **Kipas Prosesor** | \(> 1600\text{ RPM}\) / 0 (Fanless) | \(< 1600\text{ RPM}\) | Kombinasi Suhu Tinggi |
-| **Kesehatan Baterai** | \(\ge 60\%\) | \(\le 40\%\) | \(\le 20\%\) |
-| **Kesehatan SSD/NVMe** | \(> 90\%\) | \(\le 90\%\) | \(\le 80\%\) |
-| **Penggunaan Storage** | \(< 85\%\) | \(\ge 85\%\) | \(\ge 95\%\) |
-| **Penggunaan RAM** | \(< 85\%\) | \(\ge 85\%\) | \(\ge 95\%\) |
-| **Hasil Uji RAM (`memtester`)** | Passed | - | Failed |
+| Parameter | OK (0) | Warning (1) | Critical (2) | Keterangan |
+| :--- | :--- | :--- | :--- | :--- |
+| **Suhu CPU** | \(\le 75^\circ\text{C}\) | \(> 75^\circ\text{C}\) | \(> 85^\circ\text{C}\) | Deteksi real-time |
+| **Kipas Prosesor** | \(> 1600\text{ RPM}\) | \(< 1600\text{ RPM}\) | Kombinasi Suhu Tinggi | Deteksi real-time |
+| **Kesehatan Baterai** | \(\ge 60\%\) | \(\le 40\%\) | \(\le 20\%\) | Caching harian (16:00) |
+| **Kesehatan SSD/NVMe** | \(> 90\%\) | \(\le 90\%\) | \(\le 80\%\) | Caching harian (16:00) |
+| **Penggunaan Storage** | \(< 85\%\) | \(\ge 85\%\) | \(\ge 95\%\) | Caching harian (16:00) |
+| **Penggunaan RAM** | \(< 85\%\) | \(\ge 85\%\) | \(\ge 95\%\) | Deteksi real-time |
+| **Hasil Uji RAM (`memtester`)** | Passed | - | Failed | Pengujian asinkron (Sabtu 11:00) |
+
+---
+
+## ⚙️ Aturan Pengembangan & Keamanan Pembatas (Unicode Light Pipe)
+
+Demi menjaga kompatibilitas parser di sisi server Checkmk, semua skrip *local checks* kustom ini wajib mengikuti aturan teknis berikut:
+* Karakter pipa standar (**`|`**) **HANYA** boleh digunakan di kolom data kinerja (*performance data* atau *perfdata*) di bagian awal baris sebelum pemisah spasi pertama.
+* Seluruh tanda pembatas visual di dalam teks deskripsi status wajib menggunakan karakter *Unicode Light Vertical Bar* (**`❘` - U+2758**) agar parser Checkmk tidak mengalami galat `Invalid data`.
+* Jika skrip tidak mengirimkan data kinerja (*perfdata*), karakter placeholder minus (**`-`**) wajib diletakkan di kolom ketiga sebelum penulisan teks status visual.
 
 ---
 
