@@ -45,7 +45,7 @@ if ($ServerIP -notlike "http://*" -and $ServerIP -notlike "https://*") {
 
 # Konstruksi URL Unduhan
 $BaseUrl    = "https://raw.githubusercontent.com/$GithubUser/$GithubRepo/$Branch/windows"
-$MsiUrl     = "$CmkServer/$SiteName/check_mk/agents/check_mk_agent.msi"
+$MsiUrl     = "$CmkServer/$SiteName/check_mk/agents/windows/check_mk_agent.msi"
 
 # Folder lokal tujuan
 $AgentLocalFolder = "C:\\ProgramData\\checkmk\\agent\\local"
