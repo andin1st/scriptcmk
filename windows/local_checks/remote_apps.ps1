@@ -1,64 +1,76 @@
-$anydeskId = "Not Installed"
-$rustdeskId = "Not Installed"
+# =====================================================================
+# Local Check Checkmk: Daily Remote Apps Inventory Scan (Windows)
+# Scheduled to run once a day at 16:00
+# =====================================================================
+$CacheDir = "$env:ProgramData\checkmk\agent\cache"
+if (-not (Test-Path $CacheDir)) { New-Item -ItemType Directory -Force $CacheDir | Out-Null }
+$CacheFile = Join-Path $CacheDir "cache_remote_apps.txt"
 
-# ==========================================
-# 1. CARI ID ANYDESK
-# ==========================================
-$adConfig = "C:\ProgramData\AnyDesk\system.conf"
-if (Test-Path $adConfig -ErrorAction SilentlyContinue) {
-    $adMatch = Select-String -Path $adConfig -Pattern "^ad\.anynet\.id=(\d+)"
-    if ($adMatch) { 
-        $anydeskId = $adMatch.Matches.Groups[1].Value 
-    }
-}
-
-# ==========================================
-# 2. CARI ID RUSTDESK (Metode CLI & Config)
-# ==========================================
-$cliId = $null
-$rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
-
-if (Test-Path $rdExe -ErrorAction SilentlyContinue) {
-    try {
-        $cliOutput = & $rdExe --get-id 2>$null
-        $cliId = $cliOutput -replace '\s',''
-    } catch {}
-}
-
-if (![string]::IsNullOrEmpty($cliId) -and $cliId -match "^\d+$") {
-    $rustdeskId = $cliId
+# Get current hour and today's 16:00 threshold
+$Now = Get-Date
+$Today16 = Get-Date -Hour 16 -Minute 0 -Second 0
+if ($Now -lt $Today16) {
+    $Last16 = $Today16.AddDays(-1)
 } else {
-    $tomlPaths = @(
-        "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config\RustDesk.toml"
-    )
-    
-    # Tambahkan parameter abaikan error di sini
-    $userDirs = Get-ChildItem "C:\Users" -Directory -Force -ErrorAction SilentlyContinue
-    foreach ($dir in $userDirs) {
-        $tomlPaths += "$($dir.FullName)\AppData\Roaming\RustDesk\config\RustDesk.toml"
-    }
+    $Last16 = $Today16
+}
 
-    foreach ($path in $tomlPaths) {
-        # Tambahkan parameter abaikan error di sini juga
-        if (Test-Path $path -ErrorAction SilentlyContinue) {
-            $idMatch = Select-String -Path $path -Pattern "^id\s*=\s*'([^']+)'"
-            if ($idMatch) {
-                $rustdeskId = $idMatch.Matches.Groups[1].Value
-                break
-            }
-            
-            $encMatch = Select-String -Path $path -Pattern "^enc_id\s*=\s*'([^']+)'"
-            if ($encMatch) {
-                $encString = $encMatch.Matches.Groups[1].Value
-                $shortEnc = $encString.Substring(0, [math]::Min(10, $encString.Length))
-                $rustdeskId = "(Encrypted) " + $shortEnc + "..."
-                break
-            }
+$NeedUpdate = $true
+if (Test-Path $CacheFile) {
+    $CacheMtime = (Get-Item $CacheFile).LastWriteTime
+    if ($CacheMtime -ge $Last16) {
+        $NeedUpdate = $false
+    }
+}
+
+if ($NeedUpdate) {
+    $RemoteList = @()
+    
+    # --- 1. DETEKSI ANYDESK ---
+    $AnyDeskID = ""
+    # Check common system configuration path
+    $AnyConfPath = "$env:ProgramData\AnyDesk\system.conf"
+    if (Test-Path $AnyConfPath) {
+        $AnyConf = Get-Content $AnyConfPath -ErrorAction SilentlyContinue
+        $IdLine = $AnyConf | Where-Object { $_ -like "ad.id=*" }
+        if ($IdLine) {
+            $AnyDeskID = ($IdLine -replace "ad.id=", "").Trim()
         }
     }
+    # Check registry as fallback
+    if (-not $AnyDeskID) {
+        $AnyDeskID = Get-ItemPropertyValue -Path "HKCU:\Software\AnyDesk\Client" -Name "ad.id" -ErrorAction SilentlyContinue
+    }
+    
+    if ($AnyDeskID) {
+        $RemoteList += "AnyDesk ID: $AnyDeskID"
+    }
+    
+    # --- 2. DETEKSI RUSTDESK ---
+    $RustDeskID = ""
+    $RustConfPath = "$env:ProgramData\RustDesk\config\rustdesk.toml"
+    if (Test-Path $RustConfPath) {
+        $RustConf = Get-Content $RustConfPath -ErrorAction SilentlyContinue
+        # Look for id="xxx" or id = "xxx"
+        $IdLine = $RustConf | Where-Object { $_ -match "^\s*id\s*=" } | Select-Object -First 1
+        if ($IdLine) {
+            $RustDeskID = ($IdLine -split '=' | Select-Object -Last 1).Trim().Trim('"').Trim()
+        }
+    }
+    
+    if ($RustDeskID) {
+        $RemoteList += "RustDesk ID: $RustDeskID"
+    }
+    
+    # Format Detail Output
+    if ($RemoteList.Count -gt 0) {
+        $Details = $RemoteList -join " ❘ "
+    } else {
+        $Details = "No remote apps detected."
+    }
+    
+    $Output = "0 `"Remote_Apps`" - Status : OK ❘ $Details"
+    $Output | Out-File -FilePath $CacheFile -Encoding utf8 -Force
 }
 
-# ==========================================
-# 3. KIRIM OUTPUT KE CHECKMK
-# ==========================================
-Write-Host "0 `"Remote_Access_ID`" - OK: AnyDesk: $anydeskId | RustDesk: $rustdeskId"
+Get-Content $CacheFile -ErrorAction SilentlyContinue
