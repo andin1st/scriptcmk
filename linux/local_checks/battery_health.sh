@@ -53,36 +53,95 @@ if need_update "$CACHE_FILE" "$LAST_16"; then
         fi
     fi
     
+    # Inisialisasi variabel default
+    state="Unknown"
+    bat_level="N/A"
+    health="100"
+    design_cap="N/A"
+    current_cap="N/A"
+    
     # Jika ada baterai via UPower
     if [ "$has_battery" = true ]; then
         bat_info=$(upower -i "$bat_path" 2>/dev/null)
-        state=$(echo "$bat_info" | grep -i "state" | cut -d':' -f2 | xargs)
-        health_str=$(echo "$bat_info" | grep -i "capacity" | grep -o -E '[0-9.]+%?' | tr -d '%')
-        cycle=$(echo "$bat_info" | grep -i "history-charge" -A5 2>/dev/null | grep -i "cycle" | grep -o -E '[0-9]+' | head -n1)
-        [ -z "$cycle" ] && cycle=$(echo "$bat_info" | grep -i "cycle" | grep -o -E '[0-9]+' | head -n1)
-        [ -z "$cycle" ] && cycle="0"
         
-        # Validasi Health
+        # Ambil State
+        raw_state=$(echo "$bat_info" | grep -i "state" | cut -d':' -f2 | xargs)
+        case "${raw_state,,}" in
+            fully-charged) state="Fully Charged" ;;
+            discharging) state="Discharging" ;;
+            charging) state="Charging" ;;
+            empty) state="Empty" ;;
+            *)
+                if [ -n "$raw_state" ]; then
+                    state=$(echo "$raw_state" | sed 's/[-_]/ /g' | awk '{for(i=1;i<=NF;i++)sub(/./,toupper(substr($i,1,1)),$i)}1')
+                else
+                    state="Unknown"
+                fi
+                ;;
+        esac
+        
+        # Ambil Battery Level (percentage)
+        bat_level=$(echo "$bat_info" | grep -i "percentage" | cut -d':' -f2 | xargs | tr -d '%')
+        [ -z "$bat_level" ] && bat_level="N/A"
+        
+        # Ambil Health (capacity)
+        health_str=$(echo "$bat_info" | grep -i "capacity" | cut -d':' -f2 | xargs | tr -d '%')
         if [[ "$health_str" =~ ^[0-9.]+$ ]]; then
-            health=$(awk "BEGIN {print int($health_str)}")
+            health=$(awk "BEGIN {print int($health_str + 0.5)}")
         else
             health=100
         fi
+        
+        # Ambil Design & Current Capacity (dalam Wh)
+        design_str=$(echo "$bat_info" | grep -i "energy-full-design" | cut -d':' -f2 | xargs | awk '{print $1}')
+        current_str=$(echo "$bat_info" | grep -i "energy-full" | grep -v "design" | cut -d':' -f2 | xargs | awk '{print $1}')
+        
+        if [[ "$design_str" =~ ^[0-9.]+$ ]]; then
+            design_cap=$(awk "BEGIN {print int($design_str + 0.5)}")
+        fi
+        if [[ "$current_str" =~ ^[0-9.]+$ ]]; then
+            current_cap=$(awk "BEGIN {print int($current_str + 0.5)}")
+        fi
+        
     else
         # Fallback ke Sysfs jika UPower tidak mendeteksi baterai
         sys_bat_dir=$(ls -d /sys/class/power_supply/BAT* 2>/dev/null | head -n 1)
         if [ -n "$sys_bat_dir" ]; then
             has_battery=true
-            state=$(cat "$sys_bat_dir/status" 2>/dev/null | tr 'A-Z' 'a-z')
-            cycle=$(cat "$sys_bat_dir/cycle_count" 2>/dev/null || echo "0")
             
-            # Hitung kesehatan berbasis energy atau charge
-            ef_design=$(cat "$sys_bat_dir/energy_full_design" 2>/dev/null || cat "$sys_bat_dir/charge_full_design" 2>/dev/null)
-            ef_now=$(cat "$sys_bat_dir/energy_full" 2>/dev/null || cat "$sys_bat_dir/charge_full" 2>/dev/null)
+            raw_state=$(cat "$sys_bat_dir/status" 2>/dev/null | tr 'A-Z' 'a-z')
+            case "${raw_state,,}" in
+                fully-charged|full) state="Fully Charged" ;;
+                discharging) state="Discharging" ;;
+                charging) state="Charging" ;;
+                empty) state="Empty" ;;
+                *) state="Unknown" ;;
+            esac
             
-            if [ -n "$ef_design" ] && [ -n "$ef_now" ] && [ "$ef_design" -gt 0 ] 2>/dev/null; then
-                health=$(awk "BEGIN {print int(($ef_now / $ef_design) * 100)}")
+            bat_level=$(cat "$sys_bat_dir/capacity" 2>/dev/null || echo "N/A")
+            
+            # Hitung kapasitas Wh dari energy atau charge
+            raw_design=$(cat "$sys_bat_dir/energy_full_design" 2>/dev/null || cat "$sys_bat_dir/charge_full_design" 2>/dev/null)
+            raw_current=$(cat "$sys_bat_dir/energy_full" 2>/dev/null || cat "$sys_bat_dir/charge_full" 2>/dev/null)
+            raw_voltage=$(cat "$sys_bat_dir/voltage_min_design" 2>/dev/null || cat "$sys_bat_dir/voltage_now" 2>/dev/null || echo "11100000")
+            
+            if [ -n "$raw_design" ] && [ -n "$raw_current" ]; then
+                if [ -f "$sys_bat_dir/energy_full_design" ]; then
+                    design_cap=$(awk "BEGIN {print int(($raw_design / 1000000) + 0.5)}")
+                    current_cap=$(awk "BEGIN {print int(($raw_current / 1000000) + 0.5)}")
+                else
+                    design_cap=$(awk "BEGIN {print int((($raw_design * $raw_voltage) / 1000000000000) + 0.5)}")
+                    current_cap=$(awk "BEGIN {print int((($raw_current * $raw_voltage) / 1000000000000) + 0.5)}")
+                fi
+                
+                if [ -n "$design_cap" ] && [ "$design_cap" -gt 0 ] 2>/dev/null; then
+                    health=$(awk "BEGIN {print int((($current_cap / $design_cap) * 100) + 0.5)}")
+                else
+                    health=100
+                fi
             else
+                design_cap="N/A"
+                current_cap="N/A"
                 health=100
             fi
         fi
@@ -90,24 +149,21 @@ if need_update "$CACHE_FILE" "$LAST_16"; then
     
     # Output hasil sesuai tipe perangkat
     if [ "$has_battery" = true ]; then
-        [ -z "$state" ] && state="unknown"
-        
         # Evaluasi Threshold
         # OK >= 60%, WARNING <= 40%, CRITICAL <= 20%
         status=0
-        status_txt="OK"
         if [ "$health" -le 20 ]; then
             status=2
-            status_txt="Critical"
         elif [ "$health" -le 40 ]; then
             status=1
-            status_txt="Warning"
         fi
         
-        echo "$status \"Health_Battery\" - Status : $status_txt ❘ Health: ${health}% ❘ Cycle: $cycle ❘ State: $state" >> "$CACHE_FILE"
+        # Contoh Format keluaran:
+        # 0 "Health_Battery" -  Status Battery : Fully Charged ❘ Design Capacity : 35w/h ❘ Current Capacity : 10w/h ❘ Health : 28% ❘ Battery Level : 100%
+        echo "$status \"Health_Battery\" -  Status Battery : $state ❘ Design Capacity : ${design_cap}w/h ❘ Current Capacity : ${current_cap}w/h ❘ Health : ${health}% ❘ Battery Level : ${bat_level}%" >> "$CACHE_FILE"
     else
         # Jika PC Desktop / Tidak ada baterai
-        echo "0 \"Health_Battery\" - Status : OK ❘ Device is PC/Desktop, there is no battery." >> "$CACHE_FILE"
+        echo "0 \"Health_Battery\" -  Status Battery : N/A ❘ Device is PC/Desktop, there is no battery." >> "$CACHE_FILE"
     fi
 fi
 
