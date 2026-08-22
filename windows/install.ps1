@@ -11,11 +11,11 @@ if (-not $isAdmin) {
 }
 
 # 2. Konfigurasi Variabel (Silakan sesuaikan dengan URL repositori & server Anda)
-$GithubUser = "andin1st"
-$GithubRepo = "checkmk"
+$GithubUser = "username"
+$GithubRepo = "checkmk-agent-deploy"
 $Branch     = "main"
-$CmkServer  = "http://192.168.43.100:8080"
-$SiteName   = "monitoring"
+$CmkServer  = "http://your-checkmk-server:8080"
+$SiteName   = "cmk"
 
 $BaseUrl    = "https://raw.githubusercontent.com/$GithubUser/$GithubRepo/$Branch/windows"
 $MsiUrl     = "$CmkServer/$SiteName/check_mk/agents/check_mk_agent.msi"
@@ -151,4 +151,3 @@ try {
 Write-Host "=== Proses Instalasi Selesai! Agen Anda Siap Digunakan ===" -ForegroundColor Green
 Write-Host "Pastikan untuk melakukan registrasi sertifikat agen ke server Checkmk Anda menggunakan:"
 Write-Host "cmk-agent-ctl register --hostname <NAMA_HOST> --server <SERVER_IP>:8000 --site $SiteName --user cmkadmin" -ForegroundColor Yellow
-Gemini Notebook can be inaccurate; please double check its responses.

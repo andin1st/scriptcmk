@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# Checkmk Agent Bootstrap Installer - v6 (Multi-Distro & Dynamic Config)
+# =============================================================================
+# Checkmk Agent Bootstrap Installer - Unified Multi-Distro Edition
 # Supports: Debian/Ubuntu (.deb) and Fedora/RHEL/Alma/Rocky (.rpm)
-# ==============================================================================
+# =============================================================================
 
 # Ensure script is run as root
 if [ "$EUID" -ne 0 ]; then
@@ -14,12 +14,12 @@ fi
 SERVER_IP=""
 SITE_ID="cmk"
 AGENT_VERSION="2.5.0p9-1"
-GITHUB_REPO="username/checkmk-agent-deploy"
+GITHUB_REPO="andin1st/scriptcmk"
 GITHUB_BRANCH="main"
 
 # Help message
 show_help() {
-    echo "Penggunaan: sudo bash install-v6.sh [OPSI]"
+    echo "Penggunaan: sudo bash install.sh [OPSI]"
     echo ""
     echo "OPSI:"
     echo "  -s, --server IP/HOST      IP atau Hostname server Checkmk"
@@ -112,6 +112,7 @@ if [ "$OS_TYPE" = "debian" ]; then
     if curl -sSfL -o "${LOCAL_PATH}" "${DOWNLOAD_URL}"; then
         echo -e "\e[32m[INFO] Menginstal Agen Checkmk (.deb)...\e[0m"
         dpkg -i "${LOCAL_PATH}" || apt-get install -f -y
+        rm -f "${LOCAL_PATH}"
     else
         echo -e "\e[31m[ERROR] Gagal mengunduh file agen .deb. Silakan periksa kembali IP Server, Site ID, atau versi agen.\e[0m"
         exit 1
@@ -130,6 +131,7 @@ elif [ "$OS_TYPE" = "redhat" ]; then
         else
             yum install -y "${LOCAL_PATH}"
         fi
+        rm -f "${LOCAL_PATH}"
     else
         echo -e "\e[31m[ERROR] Gagal mengunduh file agen .rpm. Silakan periksa kembali IP Server, Site ID, atau versi agen.\e[0m"
         exit 1
@@ -141,12 +143,29 @@ LOCAL_CHECKS_DIR="/usr/lib/check_mk_agent/local"
 mkdir -p "${LOCAL_CHECKS_DIR}"
 chmod 755 "${LOCAL_CHECKS_DIR}"
 
+# Membersihkan cache lama agar script baru langsung dieksekusi segar
+echo -e "\e[32m[INFO] Membersihkan file cache lama agar seluruh script kustom langsung melakukan pemindaian baru...\e[0m"
+rm -f /var/lib/check_mk_agent/cache/cache_*.txt
+
 # Download Local Checks from GitHub
 echo -e "\e[32m[INFO] Mengunduh script local checks kustom dari GitHub...\e[0m"
-SCRIPTS=("cpu_os_info.sh" "ram_health.sh" "disk_nvme_health.sh" "remote_apps.sh" "battery_health.sh")
+SCRIPTS=(
+    "battery_health.sh"
+    "cpu_info.sh"
+    "disk_nvme_health.sh"
+    "fan_health.sh"
+    "info_network.sh"
+    "info_OS_office.sh"
+    "ram_health.sh"
+    "ram_usage.sh"
+    "remote_apps.sh"
+    "storage_usage.sh"
+)
+
+GITHUB_RAW_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/linux"
 
 for script in "${SCRIPTS[@]}"; do
-    SCRIPT_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/linux/local_checks/${script}"
+    SCRIPT_URL="${GITHUB_RAW_URL}/local_checks/${script}"
     TARGET_PATH="${LOCAL_CHECKS_DIR}/${script}"
     
     echo "Mengunduh: ${script}..."
@@ -204,8 +223,8 @@ EOF
 
 chmod +x "${RUNNER_PATH}"
 
-# Setup Cron Job (Dijalankan setiap tanggal 1 dan 15 pukul 02:00 pagi)
-CRON_JOB="0 2 1,15 * * ${RUNNER_PATH} >/dev/null 2>&1"
+# Setup Cron Job (Dijalankan setiap hari Sabtu pukul 11:00 AM)
+CRON_JOB="0 11 * * 6 ${RUNNER_PATH} >/dev/null 2>&1"
 (crontab -l 2>/dev/null | grep -Fv "${RUNNER_PATH}"; echo "${CRON_JOB}") | crontab -
 
 # Jalankan pengujian pertama kali di background agar langsung ada data log awal
@@ -214,6 +233,6 @@ nohup "${RUNNER_PATH}" >/dev/null 2>&1 &
 
 echo -e "\e[32m===================================================\e[0m"
 echo -e "\e[32m[SUCCESS] Instalasi Agen Checkmk Selesai!\e[0m"
-echo -e "\e[32mClient telah terdaftar di Cron Scheduler.\e[0m"
+echo -e "\e[32mClient telah terdaftar di Cron Scheduler (Setiap Sabtu pukul 11:00 AM).\e[0m"
 echo -e "\e[32mPastikan untuk mendaftarkan host ini di server Checkmk Anda.\e[0m"
 echo -e "\e[32m===================================================\e[0m"
