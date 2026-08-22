@@ -10,45 +10,15 @@ if (-not $isAdmin) {
     Exit
 }
 
-# 2. Konfigurasi Default & Parser Argumen Manual (Menghindari error 'param' di IEX)
-$ServerIP      = "192.168.1.100"       # Default IP Server Checkmk
-$SiteName      = "cmk"                 # Default Site ID Checkmk Anda
-$AgentVersion  = "2.5.0p9"             # Default Versi Agen Checkmk
-$GithubUser    = "andin1st"            # Username GitHub Anda
-$GithubRepo    = "scriptcmk"           # Nama repositori GitHub Anda
-$Branch        = "main"
+# 2. Konfigurasi Variabel (Silakan sesuaikan dengan URL repositori & server Anda)
+$GithubUser = "username"
+$GithubRepo = "checkmk-agent-deploy"
+$Branch     = "main"
+$CmkServer  = "http://your-checkmk-server:8080"
+$SiteName   = "monitoring"
 
-# Parsing argumen manual dari $args
-for ($i = 0; $i -lt $args.Count; $i++) {
-    switch ($args[$i]) {
-        "-s" { $ServerIP = $args[++$i] }
-        "-ServerIP" { $ServerIP = $args[++$i] }
-        "-d" { $SiteName = $args[++$i] }
-        "-SiteName" { $SiteName = $args[++$i] }
-        "-v" { $AgentVersion = $args[++$i] }
-        "-AgentVersion" { $AgentVersion = $args[++$i] }
-        "-g" { $GithubUser = $args[++$i] }
-        "-GithubUser" { $GithubUser = $args[++$i] }
-        "-r" { $GithubRepo = $args[++$i] }
-        "-GithubRepo" { $GithubRepo = $args[++$i] }
-        "-b" { $Branch = $args[++$i] }
-        "-Branch" { $Branch = $args[++$i] }
-    }
-}
-
-# 3. Pencegahan Port-Doubling (:8089:8000) & Ekstraksi Host
-$CleanHost = $ServerIP -replace '^https?://', ''
-$HostOnly  = ($CleanHost -split ':')[0]
-
-# Jika ServerIP mengandung port kustom (misal untuk Web GUI), gunakan port tersebut untuk download MSI
-if ($ServerIP -like "*:*") {
-    $CmkServer = "http://$ServerIP"
-} else {
-    $CmkServer = "http://$ServerIP:8080" # Default port Web GUI
-}
-
-$BaseUrl          = "https://raw.githubusercontent.com/$GithubUser/$GithubRepo/$Branch/windows"
-$MsiUrl           = "$CmkServer/$SiteName/check_mk/agents/windows/check_mk_agent.msi"
+$BaseUrl    = "https://raw.githubusercontent.com/$GithubUser/$GithubRepo/$Branch/windows"
+$MsiUrl     = "$CmkServer/$SiteName/check_mk/agents/check_mk_agent.msi"
 
 # Folder lokal tujuan
 $AgentLocalFolder = "C:\ProgramData\checkmk\agent\local"
@@ -57,12 +27,8 @@ $MsiLocalPath     = "$env:TEMP\check_mk_agent.msi"
 $RamScriptPath    = "C:\ProgramData\checkmk\agent\run_memtester.ps1"
 
 Write-Host "=== Memulai Instalasi Otomatis Agen Checkmk di Windows ===" -ForegroundColor Cyan
-Write-Host "Server IP  : $ServerIP" -ForegroundColor Gray
-Write-Host "Host Only  : $HostOnly" -ForegroundColor Gray
-Write-Host "Site Name  : $SiteName" -ForegroundColor Gray
-Write-Host "MSI URL    : $MsiUrl" -ForegroundColor Gray
 
-# 4. Buat direktori yang dibutuhkan jika belum ada
+# 3. Buat direktori yang dibutuhkan jika belum ada
 if (-not (Test-Path $AgentLocalFolder)) {
     New-Item -ItemType Directory -Force -Path $AgentLocalFolder | Out-Null
     Write-Host "[OK] Folder local checks dibuat: $AgentLocalFolder" -ForegroundColor Green
@@ -72,14 +38,7 @@ if (-not (Test-Path $LogFolder)) {
     Write-Host "[OK] Folder log custom dibuat: $LogFolder" -ForegroundColor Green
 }
 
-# Membersihkan file cache lama agar pemindaian ulang berjalan segar
-$CacheFolder = "C:\ProgramData\checkmk\agent\cache"
-if (Test-Path $CacheFolder) {
-    Remove-Item (Join-Path $CacheFolder "cache_*.txt") -Force -ErrorAction SilentlyContinue
-    Write-Host "[OK] File cache lama dibersihkan untuk pemindaian segar." -ForegroundColor Green
-}
-
-# 5. Unduh dan Instal Agen Checkmk secara Silent
+# 4. Unduh dan Instal Agen Checkmk secara Silent
 Write-Host "[-] Mengunduh installer Agen Checkmk dari server..." -ForegroundColor Yellow
 try {
     # Abaikan verifikasi SSL jika menggunakan self-signed certificate pada server Checkmk lokal
@@ -100,21 +59,16 @@ try {
     if (Test-Path $MsiLocalPath) { Remove-Item $MsiLocalPath -Force }
 }
 
-# 6. Unduh Script Local Checks dari GitHub (Tepat 10 Skrip)
+# 5. Unduh Script Local Checks dari GitHub
 $LocalChecks = @(
-    "battery_health.ps1",
-    "cpu_info.ps1",
-    "disk_nvme_health.ps1",
-    "fan_health.ps1",
-    "info_network.ps1",
-    "info_OS_office.ps1",
+    "os_cpu_health.ps1",
     "ram_health.ps1",
-    "ram_usage.ps1",
+    "disk_nvme_health.ps1",
     "remote_apps.ps1",
-    "storage_usage.ps1"
+    "ms_office_status.ps1"
 )
 
-Write-Host "[-] Mengunduh 10 script Local Checks dari GitHub..." -ForegroundColor Yellow
+Write-Host "[-] Mengunduh script Local Checks dari GitHub..." -ForegroundColor Yellow
 foreach ($script in $LocalChecks) {
     $scriptUrl = "$BaseUrl/local_checks/$script"
     $destination = Join-Path $AgentLocalFolder $script
@@ -126,8 +80,8 @@ foreach ($script in $LocalChecks) {
     }
 }
 
-# 7. Setup RAM Health (Pengujian Memtester / Memory Diagnostik Asinkron - Setiap Sabtu 11:00)
-Write-Host "[-] Menyiapkan penjadwalan uji kesehatan RAM (Setiap Sabtu 11:00 AM)..." -ForegroundColor Yellow
+# 6. Setup RAM Health (Pengujian Memtester / Memory Diagnostik Asinkron - 2 Mingguan)
+Write-Host "[-] Menyiapkan penjadwalan uji kesehatan RAM (2 mingguan)..." -ForegroundColor Yellow
 
 # Script internal Windows untuk simulasi pengujian memtester asinkron
 $RamCheckScriptContent = @'
@@ -138,6 +92,7 @@ $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 Add-Content -Path $LogFile -Value "=== MEMTESTER START: $Timestamp ==="
 
 # Menjalankan stress memory sederhana menggunakan alokasi objek .NET
+# Mengalokasikan 256MB RAM sementara untuk memverifikasi fungsionalitas memori dasar
 try {
     Write-Output "Mengalokasikan memori untuk testing..."
     $testArray = New-Object Byte[] (256 * 1024 * 1024) # 256MB
@@ -170,11 +125,12 @@ Add-Content -Path $LogFile -Value "=== MEMTESTER END: $EndTimestamp ==="
 # Simpan script pengujian RAM asinkron ke sistem
 $RamCheckScriptContent | Out-File -FilePath $RamScriptPath -Encoding utf8 -Force
 
-# Registrasikan Task Scheduler untuk berjalan setiap hari Sabtu pukul 11:00 Pagi
+# Registrasikan Task Scheduler untuk berjalan setiap 14 Hari sekali pukul 02:00 Pagi
 $TaskName = "Checkmk_RAM_Health_Test"
-$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File '$RamScriptPath'"
-$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At 11am
-$Principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\\SYSTEM" -LogonType ServiceAccount
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$RamScriptPath`""
+# Jalankan setiap 2 minggu sekali (minggu pertama dan ketiga) pada hari Minggu jam 02.00
+$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -WeeksInterval 2 -At 2am
+$Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount
 
 # Hapus task lama jika sudah ada agar ter-update
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -192,12 +148,6 @@ try {
     Write-Warning "Gagal mendaftarkan Scheduled Task untuk pengujian RAM: $_"
 }
 
-# 8. Deteksi Lokasi cmk-agent-ctl.exe untuk Membantu Registrasi yang Akurat
-$ctlPath = "C:\Program Files (x86)\checkmk\service\cmk-agent-ctl.exe"
-if (-not (Test-Path $ctlPath)) {
-    $ctlPath = "C:\Program Files\checkmk\service\cmk-agent-ctl.exe"
-}
-
 Write-Host "=== Proses Instalasi Selesai! Agen Anda Siap Digunakan ===" -ForegroundColor Green
-Write-Host "Untuk mendaftarkan sertifikat agen ke server Checkmk, jalankan perintah berikut sebagai Administrator:" -ForegroundColor Green
-Write-Host " & `"$ctlPath`" register --hostname <NAMA_HOST> --server ${HostOnly}:8000 --site $SiteName --user cmkadmin" -ForegroundColor Yellow
+Write-Host "Pastikan untuk melakukan registrasi sertifikat agen ke server Checkmk Anda menggunakan:"
+Write-Host "cmk-agent-ctl register --hostname <NAMA_HOST> --server <SERVER_IP>:8000 --site $SiteName --user cmkadmin" -ForegroundColor Yellow
