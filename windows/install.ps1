@@ -1,4 +1,4 @@
-# install-v2.ps1 - Script Installer Otomatis Agen Checkmk untuk Windows Client
+# install.ps1 - Script Installer Otomatis Agen Checkmk untuk Windows Client
 # Dijalankan via PowerShell Administrator (One-Liner Bypass)
 
 $ErrorActionPreference = "Stop"
@@ -172,9 +172,9 @@ $RamCheckScriptContent | Out-File -FilePath $RamScriptPath -Encoding utf8 -Force
 
 # Registrasikan Task Scheduler untuk berjalan setiap hari Sabtu pukul 11:00 Pagi
 $TaskName = "Checkmk_RAM_Health_Test"
-$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$RamScriptPath`\""
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File '$RamScriptPath'"
 $Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At 11am
-$Principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount
+$Principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\\SYSTEM" -LogonType ServiceAccount
 
 # Hapus task lama jika sudah ada agar ter-update
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -200,4 +200,4 @@ if (-not (Test-Path $ctlPath)) {
 
 Write-Host "=== Proses Instalasi Selesai! Agen Anda Siap Digunakan ===" -ForegroundColor Green
 Write-Host "Untuk mendaftarkan sertifikat agen ke server Checkmk, jalankan perintah berikut sebagai Administrator:" -ForegroundColor Green
-Write-Host "& `"$ctlPath`" register --hostname <NAMA_HOST> --server $HostOnly:8000 --site $SiteName --user cmkadmin" -ForegroundColor Yellow
+Write-Host " & `"$ctlPath`" register --hostname <NAMA_HOST> --server ${HostOnly}:8000 --site $SiteName --user cmkadmin" -ForegroundColor Yellow
