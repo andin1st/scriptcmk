@@ -113,9 +113,9 @@ if ($NeedUpdate) {
     }
     
     if ($OfficeVersion -eq "Tidak terpasang") {
-        $Office_Output = "0 `"Info_Office`" - OK - Product: Tidak ada aplikasi Office (Native Windows) ❘ Checked At: $CheckedAt"
+        $Office_Output = "0 `"Info_Office`" - OK - Product: Tidak ada aplikasi Office (Native Windows) | Checked At: $CheckedAt"
     } else {
-        $Office_Output = "0 `"Info_Office`" - OK - Product: $OfficeVersion | Status: Licensed ($OfficeLicense) ❘ Checked At: $CheckedAt"
+        $Office_Output = "0 `"Info_Office`" - OK - Product: $OfficeVersion | Status: Licensed ($OfficeLicense) | Checked At: $CheckedAt"
     }
     
     $Office_Output | Out-File -FilePath $CacheFile -Encoding utf8 -Append
