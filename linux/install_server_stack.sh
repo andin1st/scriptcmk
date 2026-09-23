@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-# Auto-Installer: Docker, Dockge, & Checkmk Community Edition Server Stack
+# Auto-Installer: Docker, Dockge, & Checkmk Community Edition Server
 # Multi-Distro (Ubuntu/Debian, RHEL/Fedora/CentOS)
 # =====================================================================
 
@@ -12,7 +12,7 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-echo -e "\e[36m=== Memulai Pemasangan Otomatis Docker Engine, Dockge, dan Checkmk Community Edition Server ===\e[0m"
+echo -e "\e[36m=== Memulai Pemasangan Otomatis Docker Engine, Dockge, dan Checkmk Community Edition ===\e[0m"
 
 # 2. Install Docker jika belum terpasang
 if ! command -v docker &> /dev/null; then
@@ -34,10 +34,9 @@ echo -e "\e[33m[-] Menyiapkan struktur direktori /opt/dockge dan /opt/dockge/sta
 mkdir -p /opt/dockge/data
 mkdir -p /opt/dockge/stacks/checkmk
 
-# 5. Buat Konfigurasi Docker Compose untuk Dockge (/opt/dockge/compose.yaml)
-echo -e "\e[33m[-] Membuat berkas Docker Compose untuk Dockge...\e[0m"
-cat << 'DOCKGE_EOF' > /opt/dockge/compose.yaml
-version: "3.8"
+# 5. Buat Konfigurasi Docker Compose untuk Dockge (/opt/dockge/compose.yaml - Tanpa Atribut Version)
+echo -e "\e[33m[-] Membuat/memperbarui berkas Docker Compose untuk Dockge...\e[0m"
+cat << 'EOF' > /opt/dockge/compose.yaml
 services:
   dockge:
     image: louislam/dockge:1
@@ -51,12 +50,11 @@ services:
       - /opt/dockge/stacks:/opt/dockge/stacks
     environment:
       - DOCKGE_STACKS_DIR=/opt/dockge/stacks
-DOCKGE_EOF
+EOF
 
-# 6. Buat Konfigurasi Docker Compose untuk Checkmk Community Edition (/opt/dockge/stacks/checkmk/compose.yaml)
-echo -e "\e[33m[-] Membuat berkas Docker Compose untuk Checkmk Community Edition...\e[0m"
-cat << 'CMK_EOF' > /opt/dockge/stacks/checkmk/compose.yaml
-version: "3.8"
+# 6. Buat Konfigurasi Docker Compose untuk Checkmk Server (/opt/dockge/stacks/checkmk/compose.yaml - Tanpa Atribut Version)
+echo -e "\e[33m[-] Membuat/memperbarui berkas Docker Compose untuk Checkmk Community Edition...\e[0m"
+cat << 'EOF' > /opt/dockge/stacks/checkmk/compose.yaml
 services:
   checkmk:
     image: checkmk/check-mk-community:latest
@@ -75,16 +73,50 @@ services:
 volumes:
   checkmk-data:
     driver: local
-CMK_EOF
+EOF
 
-# 7. Eksekusi Pemasangan Kontainer via Docker Compose
-echo -e "\e[33m[-] Menjalankan kontainer Dockge (Port 5001)...\e[0m"
+# 7. Jalankan Dockge Container
+echo -e "\e[33m[-] Memastikan kontainer Dockge berjalan (Port 5001)...\e[0m"
 docker compose -f /opt/dockge/compose.yaml up -d
 
-echo -e "\e[33m[-] Menjalankan kontainer Checkmk Community Edition Server (Port 8080 & 8000)...\e[0m"
-docker compose -f /opt/dockge/stacks/checkmk/compose.yaml up -d
+# 8. Logika Cerdas Pemeriksaan Checkmk Community Edition Server
+TARGET_IMAGE="checkmk/check-mk-community:latest"
+CONTAINER_NAME="checkmk-server"
+COMPOSE_FILE="/opt/dockge/stacks/checkmk/compose.yaml"
 
-# 8. Dapatkan IP Server Lokal
+IS_EXISTS=$(docker inspect -f '{{.Name}}' "$CONTAINER_NAME" 2>/dev/null || echo "")
+IS_RUNNING=$(docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || echo "false")
+
+if [ -z "$IS_EXISTS" ]; then
+    echo -e "\e[33m[-] Checkmk Community Edition Server belum terpasang. Memulai unduhan & pemasangan...\e[0m"
+    docker compose -f "$COMPOSE_FILE" up -d
+    echo -e "\e[32m[OK] Checkmk Community Edition Server berhasil diinstal dan dijalankan.\e[0m"
+else
+    echo -e "\e[36m[INFO] Checkmk Community Edition Server ($CONTAINER_NAME) sudah terdeteksi di sistem.\e[0m"
+    echo -e "\e[33m[-] Memeriksa ketersediaan pembaruan image Checkmk...\e[0m"
+    
+    LOCAL_IMAGE_ID=$(docker inspect -f '{{.Image}}' "$CONTAINER_NAME" 2>/dev/null || echo "")
+    
+    # Coba tarik image terbaru tanpa memutus container aktif terlebih dahulu
+    docker pull "$TARGET_IMAGE" >/dev/null 2>&1 || true
+    NEW_IMAGE_ID=$(docker inspect -f '{{.Id}}' "$TARGET_IMAGE" 2>/dev/null || echo "")
+    
+    if [ "$LOCAL_IMAGE_ID" != "$NEW_IMAGE_ID" ] && [ -n "$NEW_IMAGE_ID" ]; then
+        echo -e "\e[33m[UPDATE] Terdeteksi versi baru Checkmk Community Edition! Memperbarui container...\e[0m"
+        docker compose -f "$COMPOSE_FILE" up -d
+        echo -e "\e[32m[OK] Checkmk Server berhasil diperbarui ke versi terbaru!\e[0m"
+    else
+        if [ "$IS_RUNNING" = "true" ]; then
+            echo -e "\e[32m[OK] Checkmk Community Edition Server sudah terinstall, berjalan, dan berada pada versi terbaru. Melewati proses download/instalasi.\e[0m"
+        else
+            echo -e "\e[33m[-] Checkmk Server sudah terinstall versi terbaru tetapi belum berjalan. Menjalankan container...\e[0m"
+            docker compose -f "$COMPOSE_FILE" up -d
+            echo -e "\e[32m[OK] Checkmk Server berhasil diaktifkan kembali.\e[0m"
+        fi
+    fi
+fi
+
+# 9. Dapatkan IP Server Lokal
 SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 if [ -z "$SERVER_IP" ]; then
     SERVER_IP="<IP_SERVER_ANDA>"
