@@ -77,7 +77,7 @@ Setelah agen terpasang pada komputer client, lakukan pendaftaran sertifikat TLS 
 
 * **Linux Host (Terminal / Root)**:
   ```bash
-  sudo cmk-agent-ctl register     --hostname <NAMA_HOST_CLIENT>     --server <IP_SERVER_CHECKMK>:8000     --site cmk     --user cmkadmin
+  sudo cmk-agent-ctl register --hostname <NAMA_HOST_CLIENT> --server <IP_SERVER_CHECKMK>:8000 --site cmk --user cmkadmin
   ```
 
 * **Windows Host (PowerShell Administrator)**:
@@ -86,7 +86,7 @@ Setelah agen terpasang pada komputer client, lakukan pendaftaran sertifikat TLS 
   if (-not (Test-Path $ctlPath)) {
       $ctlPath = "C:\Program Files\checkmk\service\cmk-agent-ctl.exe"
   }
-  & "$ctlPath" register     --hostname <NAMA_HOST_CLIENT>     --server <IP_SERVER_CHECKMK>:8000     --site cmk     --user cmkadmin
+  & "$ctlPath" register --hostname <NAMA_HOST_CLIENT> --server <IP_SERVER_CHECKMK>:8000 --site cmk --user cmkadmin
   ```
 
 ---
