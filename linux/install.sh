@@ -13,7 +13,7 @@ fi
 # Default variables
 SERVER_IP=""
 SITE_ID="cmk"
-AGENT_VERSION="2.5.0p9-1"
+AGENT_VERSION="2.5.0p14-1"
 GITHUB_REPO="andin1st/scriptcmk"
 GITHUB_BRANCH="main"
 
@@ -24,7 +24,7 @@ show_help() {
     echo "OPSI:"
     echo "  -s, --server IP/HOST      IP atau Hostname server Checkmk"
     echo "  -d, --site SITE_ID        Site ID Checkmk (Default: cmk)"
-    echo "  -v, --version VERSION     Versi Agen Checkmk (Default: 2.5.0p9-1)"
+    echo "  -v, --version VERSION     Versi Agen Checkmk (Default: 2.5.0p14-1)"
     echo "  -g, --github REPO         Repositori GitHub kustom (Format: user/repo)"
     echo "  -b, --branch BRANCH       Branch GitHub (Default: main)"
     echo "  -h, --help                Tampilkan bantuan"
