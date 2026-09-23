@@ -1,14 +1,11 @@
-# docker-compose-checkmk.yml
-# Checkmk Community / Raw Edition (Latest Stable)
-
 services:
   checkmk:
-    image: checkmk/check-mk-raw:latest
+    image: checkmk/check-mk-community:latest
     container_name: checkmk-server
     restart: always
     ports:
-      - "8080:5000"  # Web GUI (http://localhost:8080/cmk)
-      - "8000:8000"  # Agent Controller (TLS registration)
+      - "8080:5000"  # Web GUI Checkmk
+      - "8000:8000"  # Agent Controller TLS Registration
     environment:
       - CMK_PASSWORD=cmkadmin
       - CMK_SITE_ID=cmk
