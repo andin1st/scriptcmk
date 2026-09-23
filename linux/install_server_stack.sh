@@ -36,7 +36,7 @@ mkdir -p /opt/dockge/stacks/checkmk
 
 # 5. Buat Konfigurasi Docker Compose untuk Dockge (/opt/dockge/compose.yaml)
 echo -e "\e[33m[-] Membuat berkas Docker Compose untuk Dockge...\e[0m"
-cat << 'EOF' > /opt/dockge/compose.yaml
+cat << 'DOCKGE_EOF' > /opt/dockge/compose.yaml
 version: "3.8"
 services:
   dockge:
@@ -51,19 +51,19 @@ services:
       - /opt/dockge/stacks:/opt/dockge/stacks
     environment:
       - DOCKGE_STACKS_DIR=/opt/dockge/stacks
-EOF
+DOCKGE_EOF
 
-# 6. Buat Konfigurasi Docker Compose untuk Checkmk Community Edition Server (/opt/dockge/stacks/checkmk/compose.yaml)
-echo -e "\e[33m[-] Membuat berkas Docker Compose untuk Checkmk Community Edition Server...\e[0m"
-cat << 'EOF' > /opt/dockge/stacks/checkmk/compose.yaml
+# 6. Buat Konfigurasi Docker Compose untuk Checkmk Community Edition (/opt/dockge/stacks/checkmk/compose.yaml)
+echo -e "\e[33m[-] Membuat berkas Docker Compose untuk Checkmk Community Edition...\e[0m"
+cat << 'CMK_EOF' > /opt/dockge/stacks/checkmk/compose.yaml
 version: "3.8"
 services:
   checkmk:
-    image: checkmk/check-mk-raw:2.5.0-latest
+    image: checkmk/check-mk-community:latest
     container_name: checkmk-server
     restart: always
     ports:
-      - "8080:5000"  # Web GUI Checkmk Community Edition
+      - "8080:5000"  # Web GUI Checkmk
       - "8000:8000"  # Agent Controller TLS Registration
     environment:
       - CMK_PASSWORD=cmkadmin
@@ -75,7 +75,7 @@ services:
 volumes:
   checkmk-data:
     driver: local
-EOF
+CMK_EOF
 
 # 7. Eksekusi Pemasangan Kontainer via Docker Compose
 echo -e "\e[33m[-] Menjalankan kontainer Dockge (Port 5001)...\e[0m"
