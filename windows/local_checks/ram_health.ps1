@@ -72,7 +72,7 @@ if ($NeedUpdate) {
         $ActiveStr = "None"
     }
     
-    $SlotOutput = "Used Slots: $UsedSlots/$TotalSlots ($EmptySlots Empty) ❘ Active Modules: [$ActiveStr]"
+    $SlotOutput = "Used Slots: $UsedSlots/$TotalSlots ($EmptySlots Empty) | Active Modules: [$ActiveStr]"
     
     # --- 2. PEMBACAAN LOG MEMTESTER ---
     if (-not (Test-Path $LogFile)) {
