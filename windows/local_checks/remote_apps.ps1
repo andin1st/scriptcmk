@@ -100,7 +100,7 @@ if ($NeedUpdate) {
         $Details = "No remote apps detected."
     }
     
-    $Output = "0 `"Remote_Apps`" - Status : OK | $Details"
+    $Output = "0 `"Info_Remote_Support`" - Status : OK | $Details"
     $Output | Out-File -FilePath $CacheFile -Encoding utf8 -Force
 }
 
