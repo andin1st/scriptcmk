@@ -105,7 +105,7 @@ if ($NeedUpdate) {
             
             # Clean model name for service name
             $CleanModel = $Model -replace '[^\w\s-]', ''
-            $ServiceName = "Storage_Health_$CleanModel"
+            $ServiceName = "Health_Storage_$CleanModel"
             
             if ($MediaType -eq "HDD") {
                 # HDD Status Output
