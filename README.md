@@ -10,6 +10,7 @@ Proyek ini bertujuan untuk membangun sistem monitoring aset perusahaan menggunak
 andin1st/scriptcmk/
 ├── .gitignore
 ├── README.md
+├── docker-compose-checkmk.yml
 ├── linux/
 │   ├── install.sh                  # Skrip Bootstrap Installer Linux Client (Multi-Distro)
 │   ├── install_server_stack.sh     # Auto-Installer Server Stack (Docker Engine, Dockge, Checkmk Community)
