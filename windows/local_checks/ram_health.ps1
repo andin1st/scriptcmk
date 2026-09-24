@@ -72,7 +72,7 @@ if ($NeedUpdate) {
         $ActiveStr = "None"
     }
     
-    $SlotOutput = "Used Slots: $UsedSlots/$TotalSlots ($EmptySlots Empty) ❘ Active Modules: [$ActiveStr]"
+    $SlotOutput = "Used Slots: $UsedSlots/$TotalSlots ($EmptySlots Empty) | Active Modules: [$ActiveStr]"
     
     # --- 2. PEMBACAAN LOG MEMTESTER ---
     if (-not (Test-Path $LogFile)) {
@@ -84,7 +84,7 @@ if ($NeedUpdate) {
         } else {
             $EstSize = "N/A"
         }
-        $Output = "0 `"Health_RAM`" - Status : OK ❘ Result: Passed ❘ Tested Size: $EstSize ❘ Last Test: No test run yet ❘ $SlotOutput ❘ Log: Waiting for first scheduled memtester run on Saturday 11:00 AM."
+        $Output = "0 `"Health_RAM`" - Status : OK | Result: Passed | Tested Size: $EstSize | Last Test: No test run yet | $SlotOutput | Log: Waiting for first scheduled memtester run on Saturday 11:00 AM."
     } else {
         $LogContent = Get-Content $LogFile -ErrorAction SilentlyContinue
         
@@ -129,7 +129,7 @@ if ($NeedUpdate) {
             $LogSummary = "Memory test failed during allocation or hardware diagnostics."
         }
         
-        $Output = "$StatusCode `"Health_RAM`" - Status : $StatusTxt ❘ Result: $ResultTxt ❘ Tested Size: $SampleSize | Last Test: $FormattedTime | $SlotOutput | Log: $LogSummary"
+        $Output = "$StatusCode `"Health_RAM`" - Status : $StatusTxt | Result: $ResultTxt | Tested Size: $SampleSize | Last Test: $FormattedTime | $SlotOutput | Log: $LogSummary"
     }
     
     $Output | Out-File -FilePath $CacheFile -Encoding utf8 -Force
