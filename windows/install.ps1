@@ -1,5 +1,5 @@
 # install.ps1 - Script Installer Otomatis Agen Checkmk untuk Windows Client
-# Dijalankan via PowerShell Administrator (One-Liner Bypass)
+# Dijalankan via PowerShell Administrator (Mendukung Mode Interaktif & CLI Arguments)
 
 $ErrorActionPreference = "Stop"
 
@@ -10,45 +10,81 @@ if (-not $isAdmin) {
     Exit
 }
 
-# 2. Konfigurasi Default & Parser Argumen Manual (Menghindari error 'param' di IEX)
-$ServerIP      = "192.168.1.100"       # Default IP Server Checkmk
-$SiteName      = "cmk"                 # Default Site ID Checkmk Anda
-$AgentVersion  = "2.5.0p9"             # Default Versi Agen Checkmk
-$GithubUser    = "andin1st"            # Username GitHub Anda
-$GithubRepo    = "scriptcmk"           # Nama repositori GitHub Anda
+# 2. Inisialisasi Variabel Default & Parsing Argumen Baris Perintah ($args)
+$ServerIP      = ""
+$WebPort       = ""
+$SiteName      = "cmk"
+$AgentVersion  = "2.5.0p9-1"
+$GithubUser    = "andin1st"
+$GithubRepo    = "scriptcmk"
 $Branch        = "main"
 
-# Parsing argumen manual dari $args
+# Manual Argument Parser (Sangat fleksibel untuk iex dan CLI)
 for ($i = 0; $i -lt $args.Count; $i++) {
-    switch ($args[$i]) {
-        "-s" { $ServerIP = $args[++$i] }
-        "-ServerIP" { $ServerIP = $args[++$i] }
-        "-d" { $SiteName = $args[++$i] }
-        "-SiteName" { $SiteName = $args[++$i] }
-        "-v" { $AgentVersion = $args[++$i] }
-        "-AgentVersion" { $AgentVersion = $args[++$i] }
-        "-g" { $GithubUser = $args[++$i] }
-        "-GithubUser" { $GithubUser = $args[++$i] }
-        "-r" { $GithubRepo = $args[++$i] }
-        "-GithubRepo" { $GithubRepo = $args[++$i] }
-        "-b" { $Branch = $args[++$i] }
-        "-Branch" { $Branch = $args[++$i] }
+    switch -regex ($args[$i]) {
+        '^(-s|--server|-ServerIP)$'     { $ServerIP     = $args[++$i] }
+        '^(-p|--port|-Port)$'           { $WebPort      = $args[++$i] }
+        '^(-d|--site|-SiteName)$'       { $SiteName     = $args[++$i] }
+        '^(-v|--version|-AgentVersion)$'{ $AgentVersion = $args[++$i] }
+        '^(-g|--github|-GithubUser)$'  { $GithubUser   = $args[++$i] }
+        '^(-r|--repo|-GithubRepo)$'    { $GithubRepo   = $args[++$i] }
+        '^(-b|--branch|-Branch)$'      { $Branch       = $args[++$i] }
     }
 }
 
-# 3. Pencegahan Port-Doubling (:8089:8000) & Ekstraksi Host
-$CleanHost = $ServerIP -replace '^https?://', ''
-$HostOnly  = ($CleanHost -split ':')[0]
+Write-Host "=== Memulai Instalasi Otomatis Agen Checkmk di Windows ===" -ForegroundColor Cyan
 
-# Jika ServerIP mengandung port kustom (misal untuk Web GUI), gunakan port tersebut untuk download MSI
-if ($ServerIP -like "*:*") {
-    $CmkServer = "http://$ServerIP"
-} else {
-    $CmkServer = "http://$ServerIP:8080" # Default port Web GUI
+# 3. Mode Interaktif (Jika ServerIP tidak diberikan via argumen)
+if ([string]::IsNullOrWhiteSpace($ServerIP)) {
+    Write-Host "`n[MODE INTERAKTIF] Silakan masukkan konfigurasi server Checkmk Anda:" -ForegroundColor Yellow
+    
+    while ([string]::IsNullOrWhiteSpace($ServerIP)) {
+        $ServerIP = (Read-Host "1. Masukkan Alamat Server Checkmk (IP / Hostname) [Contoh: 192.168.1.100]").Trim()
+        if ([string]::IsNullOrWhiteSpace($ServerIP)) {
+            Write-Host "   [!] Alamat server tidak boleh kosong!" -ForegroundColor Red
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($WebPort)) {
+        $inputPort = (Read-Host "2. Masukkan Port Web GUI Checkmk [Default: 8080]").Trim()
+        if (-not [string]::IsNullOrWhiteSpace($inputPort)) {
+            $WebPort = $inputPort
+        } else {
+            $WebPort = "8080"
+        }
+    }
+
+    $inputSite = (Read-Host "3. Masukkan Site ID Checkmk [Default: $SiteName]").Trim()
+    if (-not [string]::IsNullOrWhiteSpace($inputSite)) {
+        $SiteName = $inputSite
+    }
+
+    $inputVer = (Read-Host "4. Masukkan Versi Agen Checkmk [Default: $AgentVersion]").Trim()
+    if (-not [string]::IsNullOrWhiteSpace($inputVer)) {
+        $AgentVersion = $inputVer
+    }
 }
 
-$BaseUrl          = "https://raw.githubusercontent.com/$GithubUser/$GithubRepo/$Branch/windows"
-$MsiUrl           = "$CmkServer/$SiteName/check_mk/agents/windows/check_mk_agent.msi"
+# Jika WebPort masih kosong (misal lewat CLI -s 192.168.1.100 tanpa -p)
+if ([string]::IsNullOrWhiteSpace($WebPort)) {
+    if ($ServerIP -like "*:*") {
+        # Jika user memasukkan 192.168.1.100:8080 di ServerIP
+        $parts = $ServerIP -split ':'
+        $HostOnly = $parts[0]
+        $WebPort = $parts[1]
+    } else {
+        $HostOnly = $ServerIP
+        $WebPort = "8080"
+    }
+} else {
+    $CleanHost = $ServerIP -replace '^https?://', ''
+    $HostOnly  = ($CleanHost -split ':')[0]
+}
+
+# Konstruksi URL Download & GitHub Base
+$CmkServerDownloadUrl = "http://${HostOnly}:${WebPort}"
+$BaseUrl              = "https://raw.githubusercontent.com/$GithubUser/$GithubRepo/$Branch/windows"
+$MsiUrl               = "$CmkServerDownloadUrl/$SiteName/check_mk/agents/windows/check_mk_agent.msi"
 
 # Folder lokal tujuan
 $AgentLocalFolder = "C:\ProgramData\checkmk\agent\local"
@@ -56,14 +92,14 @@ $LogFolder        = "C:\ProgramData\checkmk\agent\log_custom"
 $MsiLocalPath     = "$env:TEMP\check_mk_agent.msi"
 $RamScriptPath    = "C:\ProgramData\checkmk\agent\run_memtester.ps1"
 
-Write-Host "=== Memulai Instalasi Otomatis Agen Checkmk di Windows ===" -ForegroundColor Cyan
-Write-Host "Server IP  : $ServerIP" -ForegroundColor Gray
-Write-Host "Host Only  : $HostOnly" -ForegroundColor Gray
-Write-Host "Site Name  : $SiteName" -ForegroundColor Gray
-Write-Host "Target Ver : $AgentVersion" -ForegroundColor Gray
-Write-Host "MSI URL    : $MsiUrl" -ForegroundColor Gray
+Write-Host "`n=== Ringkasan Konfigurasi Target ===" -ForegroundColor Green
+Write-Host "Server Host : $HostOnly" -ForegroundColor Gray
+Write-Host "Web Port    : $WebPort" -ForegroundColor Gray
+Write-Host "Site ID     : $SiteName" -ForegroundColor Gray
+Write-Host "Versi Agen  : $AgentVersion" -ForegroundColor Gray
+Write-Host "MSI URL     : $MsiUrl" -ForegroundColor Gray
 
-# 4. Buat direktori yang dibutuhkan jika belum ada
+# 4. Buat direktori lokal agen jika belum ada
 if (-not (Test-Path $AgentLocalFolder)) {
     New-Item -ItemType Directory -Force -Path $AgentLocalFolder | Out-Null
     Write-Host "[OK] Folder local checks dibuat: $AgentLocalFolder" -ForegroundColor Green
@@ -80,12 +116,13 @@ if (Test-Path $CacheFolder) {
     Write-Host "[OK] File cache lama dibersihkan untuk pemindaian segar." -ForegroundColor Green
 }
 
-# 5. Pemeriksaan Status & Versi Agen Terpasang (Pencegahan Re-download & Re-install)
+# 5. Pemeriksaan Status & Versi Agen Terpasang (Smart Version Check)
 $ShouldInstall = $true
 $InstalledVersion = $null
 
-Write-Host "[-] Memeriksa status instalasi Agen Checkmk pada komputer host..." -ForegroundColor Yellow
+Write-Host "[-] Memeriksa status instalasi Agen Checkmk pada sistem..." -ForegroundColor Yellow
 
+# Query Registry untuk mencari "Checkmk Agent"
 $RegUninstallPaths = @(
     "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
     "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
@@ -95,18 +132,20 @@ $RegAgent = Get-ItemProperty -Path $RegUninstallPaths -ErrorAction SilentlyConti
 
 if ($RegAgent) {
     $InstalledVersion = $RegAgent.DisplayVersion
-    Write-Host "[INFO] Agen Checkmk terdeteksi terpasang di sistem. Versi: $InstalledVersion" -ForegroundColor Gray
+    Write-Host "[INFO] Agen Checkmk terdeteksi terpasang. Versi: $InstalledVersion" -ForegroundColor Gray
 } else {
+    # Fallback ke file exe langsung
     $agentExe = "C:\Program Files (x86)\checkmk\service\check_mk_agent.exe"
     if (-not (Test-Path $agentExe)) {
         $agentExe = "C:\Program Files\checkmk\service\check_mk_agent.exe"
     }
     if (Test-Path $agentExe) {
         $InstalledVersion = (Get-Item $agentExe).VersionInfo.ProductVersion
-        Write-Host "[INFO] File Agen Checkmk ditemukan di disk. Versi: $InstalledVersion" -ForegroundColor Gray
+        Write-Host "[INFO] Executable Agen Checkmk ditemukan. Versi: $InstalledVersion" -ForegroundColor Gray
     }
 }
 
+# Pembanding versi cerdas
 function Compare-Versions {
     param([string]$v1, [string]$v2)
     if ($v1 -eq $v2) { return 0 }
@@ -130,15 +169,15 @@ if ($InstalledVersion) {
         Write-Host "[OK] Versi terpasang ($InstalledVersion) sudah sesuai atau lebih baru dibanding versi server ($AgentVersion)." -ForegroundColor Green
         Write-Host "[INFO] Melewati pengunduhan dan pemasangan ulang file MSI agen." -ForegroundColor Green
     } else {
-        Write-Host "[WARNING] Versi terpasang ($InstalledVersion) lebih usang dibanding versi target server ($AgentVersion)." -ForegroundColor Yellow
+        Write-Host "[WARNING] Versi terpasang ($InstalledVersion) lebih usang dibanding versi target ($AgentVersion)." -ForegroundColor Yellow
         Write-Host "[-] Mempersiapkan proses pembaruan (upgrade) ke versi $AgentVersion..." -ForegroundColor Yellow
     }
 } else {
-    Write-Host "[INFO] Agen Checkmk belum terpasang di komputer host target." -ForegroundColor Gray
+    Write-Host "[INFO] Agen Checkmk belum terpasang di komputer ini." -ForegroundColor Gray
     Write-Host "[-] Memulai instalasi baru versi $AgentVersion..." -ForegroundColor Yellow
 }
 
-# 6. Unduh dan Pemasangan Agen Checkmk secara Silent (Hanya jika dibutuhkan)
+# 6. Unduh dan Instal Agen Checkmk secara Silent (Hanya jika dibutuhkan)
 if ($ShouldInstall) {
     Write-Host "[-] Mengunduh installer Agen Checkmk dari server ($MsiUrl)..." -ForegroundColor Yellow
     try {
@@ -154,13 +193,13 @@ if ($ShouldInstall) {
             Write-Warning "Instalasi agen selesai dengan ExitCode: $($installProcess.ExitCode)"
         }
     } catch {
-        Write-Error "Gagal mengunduh atau menginstal agen Checkmk: $_"
+        Write-Error "Gagal mengunduh atau menginstal agen Checkmk dari $MsiUrl : $_"
     } finally {
         if (Test-Path $MsiLocalPath) { Remove-Item $MsiLocalPath -Force }
     }
 }
 
-# 7. Unduh Script Local Checks dari GitHub (10 Skrip Suite)
+# 7. Unduh 10 Script Local Checks dari GitHub
 $LocalChecks = @(
     "battery_health.ps1",
     "cpu_info.ps1",
@@ -174,7 +213,7 @@ $LocalChecks = @(
     "storage_usage.ps1"
 )
 
-Write-Host "[-] Mengunduh script Local Checks dari GitHub ($BaseUrl/local_checks/)..." -ForegroundColor Yellow
+Write-Host "[-] Mengunduh 10 script Local Checks dari GitHub..." -ForegroundColor Yellow
 foreach ($script in $LocalChecks) {
     $scriptUrl = "$BaseUrl/local_checks/$script"
     $destination = Join-Path $AgentLocalFolder $script
@@ -186,40 +225,40 @@ foreach ($script in $LocalChecks) {
     }
 }
 
-# 8. Setup RAM Health Runner (Pengujian Memtester / Memory Diagnostik Asinkron - Dinamis 20% Free RAM)
-Write-Host "[-] Menyiapkan penjadwalan uji kesehatan RAM (Setiap Sabtu 11:00 AM)..." -ForegroundColor Yellow
+# 8. Setup RAM Health (Pengujian Memtester Dinamis 20% Free RAM - Setiap Sabtu 11:00 AM)
+Write-Host "[-] Menyiapkan penjadwalan uji kesehatan RAM (Dinamis 20% Free RAM)..." -ForegroundColor Yellow
 
 $RamCheckScriptContent = @'
-# Script Windows RAM Test (Pengujian memtester asinkron dinamis 20% Free RAM)
-$LogFile = "C:\ProgramData\checkmkgent\log_custom\memtester_health.log"
+# Script Windows RAM Test (Pengujian Memtester Dinamis 20% Free RAM)
+$LogFile = "C:\ProgramData\checkmk\agent\log_custom\memtester_health.log"
 $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
 Add-Content -Path $LogFile -Value "=== MEMTESTER START: $Timestamp ==="
 
 try {
-    # Hitung 20% dari Free Physical Memory saat ini secara dinamis
+    # Hitung 20% dari Free Physical Memory saat ini
     $FreeKB = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).FreePhysicalMemory
     $SampleMB = [Math]::Max(128, [Math]::Floor(($FreeKB / 1024) * 0.20))
     
     Add-Content -Path $LogFile -Value "SAMPLE_SIZE: ${SampleMB}M"
-    Add-Content -Path $LogFile -Value "Mengalokasikan ${SampleMB}MB RAM (20% Free RAM) untuk testing..."
+    Add-Content -Path $LogFile -Value "Mengalokasikan $SampleMB MB memori untuk pengujian..."
     
-    $SizeBytes = [int64]$SampleMB * 1024 * 1024
-    $testArray = New-Object Byte[] $SizeBytes
+    $ByteCount = [long]$SampleMB * 1024 * 1024
+    $testArray = New-Object Byte[] $ByteCount
     for ($i = 0; $i -lt $testArray.Length; $i += 4096) {
         $testArray[$i] = 1
     }
     $testArray = $null
     [System.GC]::Collect()
     
-    $memoryErrors = Get-CimInstance -ClassName Win32_MemoryDevice -ErrorAction SilentlyContinue | Where-Object { $_.ErrorCorrecting -eq $true -and $_.ErrorDescription -ne $null }
+    $memoryErrors = Get-CimInstance -ClassName Win32_MemoryDevice | Where-Object { $_.ErrorCorrecting -eq $true -and $_.ErrorDescription -ne $null }
     
     if ($memoryErrors) {
         Add-Content -Path $LogFile -Value "STATUS: FAILED"
         Add-Content -Path $LogFile -Value "Error details: Terdeteksi kesalahan hardware pada modul RAM."
     } else {
         Add-Content -Path $LogFile -Value "STATUS: SUCCESS"
-        Add-Content -Path $LogFile -Value "Memory allocation ($SampleMB MB) and system diagnostics passed."
+        Add-Content -Path $LogFile -Value "Memory allocation and system diagnostics passed."
     }
 } catch {
     Add-Content -Path $LogFile -Value "STATUS: FAILED"
@@ -232,11 +271,11 @@ Add-Content -Path $LogFile -Value "=== MEMTESTER END: $EndTimestamp ==="
 
 $RamCheckScriptContent | Out-File -FilePath $RamScriptPath -Encoding utf8 -Force
 
-# Registrasikan Task Scheduler untuk berjalan setiap hari Sabtu pukul 11:00 Pagi
+# Task Scheduler - Setiap Sabtu 11:00 AM
 $TaskName = "Checkmk_RAM_Health_Test"
-$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File '$RamScriptPath'"
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$RamScriptPath`""
 $Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At 11am
-$Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount
+$Principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount
 
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false | Out-Null
@@ -252,12 +291,15 @@ try {
     Write-Warning "Gagal mendaftarkan Scheduled Task untuk pengujian RAM: $_"
 }
 
-# 9. Deteksi Lokasi cmk-agent-ctl.exe untuk Membantu Registrasi mTLS
+# 9. Deteksi Lokasi cmk-agent-ctl.exe
 $ctlPath = "C:\Program Files (x86)\checkmk\service\cmk-agent-ctl.exe"
 if (-not (Test-Path $ctlPath)) {
     $ctlPath = "C:\Program Files\checkmk\service\cmk-agent-ctl.exe"
 }
 
-Write-Host "=== Proses Instalasi Selesai! Agen Anda Siap Digunakan ===" -ForegroundColor Green
-Write-Host "Untuk mendaftarkan sertifikat agen mTLS ke server Checkmk, jalankan perintah berikut sebagai Administrator:" -ForegroundColor Green
+Write-Host "`n=====================================================================" -ForegroundColor Green
+Write-Host "  PROSES INSTALASI SELESAI & SELURUH SCRIPT MONITORING TERPASANG!" -ForegroundColor Green
+Write-Host "=====================================================================" -ForegroundColor Green
+Write-Host "Untuk mendaftarkan sertifikat keamanan agen (mTLS) ke server Checkmk, jalankan:" -ForegroundColor Cyan
 Write-Host " & `"$ctlPath`" register --hostname <NAMA_HOST> --server ${HostOnly}:8000 --site $SiteName --user cmkadmin" -ForegroundColor Yellow
+Write-Host "=====================================================================`n" -ForegroundColor Green
