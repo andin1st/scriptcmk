@@ -1,4 +1,4 @@
-# Standardisasi Monitoring Checkmk (andin1st/scriptcmk)
+# Checkmk Client Monitoring Agent Script Suite
 
 Proyek ini bertujuan untuk membangun sistem monitoring aset perusahaan menggunakan **Checkmk** secara terpusat, otomatis, dan seragam. Semua berkas konfigurasi, skrip instalasi (*installer*), dan skrip pemantauan (*local checks*) dikelola secara terpusat melalui repositori GitHub resmi: **`andin1st/scriptcmk`**.
 
