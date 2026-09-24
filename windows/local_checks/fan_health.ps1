@@ -30,7 +30,7 @@ if ($fanSpeed -eq 0) {
 # 3. Format Output Local Check Checkmk
 # Catatan: Menggunakan pembatas '~' pada teks deskripsi agar bebas dari error parsing perfdata '|' Checkmk
 if ($fanSpeed -gt 0) {
-    Write-Output "0 `"FAN_Health`" fan_speed=${fanSpeed};1600;;0; Status : OK ~ FAN Speed : ${fanSpeed}rpm ~ Sensor: ${sensorName} ~ Remark: FAN Condition Good"
+    Write-Output "0 `"Health_FAN_Processor`" fan_speed=${fanSpeed};1600;;0; Status : OK | FAN Speed : ${fanSpeed}rpm | Sensor: ${sensorName} | Remark: FAN Condition Good"
 } else {
-    Write-Output "0 `"FAN_Health`" - Status : OK ~ FAN Speed : 0rpm ~ Remark: Passive Cooling or Sensor Not Exposed"
+    Write-Output "0 `"Health_FAN_Processor`" - Status : OK | FAN Speed : 0rpm | Remark: Passive Cooling or Sensor Not Exposed"
 }
