@@ -24,84 +24,114 @@ if (Test-Path $CacheFile) {
 }
 
 if ($NeedUpdate) {
-    $DesignMwh = 0
-    $FullMwh = 0
-    $BatteryLevel = 0
-    $State = "AC Power"
+    # 1. Check if Battery exists on system
+    $Battery = Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue
     $HasBattery = $false
-
-    # --- 1. DETEKSI MULTI-LAYER UNTUK UJI KEREADAAN BATERAI ---
-    # Layer A: Win32_Battery
-    $CimBat = Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue
-    if ($CimBat) {
+    if ($Battery) {
         $HasBattery = $true
-        if ($CimBat.EstimatedChargeRemaining) { $BatteryLevel = $CimBat.EstimatedChargeRemaining }
-        
-        $StateVal = $CimBat.BatteryStatus
-        if ($StateVal -eq 1) { $State = "Discharging" }
-        elseif ($StateVal -eq 2) { $State = "Fully Charged" }
-        elseif ($StateVal -eq 6) { $State = "Charging" }
-        
-        if ($CimBat.DesignCapacity -and $CimBat.DesignCapacity -gt 0) { $DesignMwh = $CimBat.DesignCapacity }
-        if ($CimBat.FullChargeCapacity -and $CimBat.FullChargeCapacity -gt 0) { $FullMwh = $CimBat.FullChargeCapacity }
+    } else {
+        $StaticData = Get-CimInstance -Namespace root\wmi -ClassName BatteryStaticData -ErrorAction SilentlyContinue
+        if ($StaticData) { $HasBattery = $true }
     }
 
-    # Layer B: WMI root\wmi (ACPI Direct)
-    $StaticData = Get-CimInstance -Namespace root\wmi -ClassName BatteryStaticData -ErrorAction SilentlyContinue
-    if ($StaticData) {
-        $HasBattery = $true
-        if ($StaticData.DesignedCapacity -and $StaticData.DesignedCapacity -gt 0) {
-            $DesignMwh = $StaticData.DesignedCapacity
-        }
-    }
-    $FullData = Get-CimInstance -Namespace root\wmi -ClassName BatteryFullChargedCapacity -ErrorAction SilentlyContinue
-    if ($FullData -and $FullData.FullChargedCapacity -gt 0) {
-        $FullMwh = $FullData.FullChargedCapacity
-    }
-    $StatusData = Get-CimInstance -Namespace root\wmi -ClassName BatteryStatus -ErrorAction SilentlyContinue
-    if ($StatusData -and $StatusData.RemainingCapacity) {
-        if ($FullMwh -gt 0) {
-            $BatteryLevel = [int](($StatusData.RemainingCapacity / $FullMwh) * 100)
-        }
-    }
-
-    # Layer C: powercfg /batteryreport /xml
-    $XmlPath = "$env:TEMP\battery_report.xml"
-    try {
-        $null = powercfg /batteryreport /xml /output $XmlPath 2>$null
-        if (Test-Path $XmlPath) {
-            [xml]$xml = Get-Content $XmlPath -ErrorAction SilentlyContinue
-            $batNode = $xml.BatteryReport.Batteries.Battery | Select-Object -First 1
-            if ($batNode) {
-                $HasBattery = $true
-                if ($batNode.DesignCapacity -and [int]$batNode.DesignCapacity -gt 0) { 
-                    $DesignMwh = [int]$batNode.DesignCapacity 
-                }
-                if ($batNode.FullChargeCapacity -and [int]$batNode.FullChargeCapacity -gt 0) { 
-                    $FullMwh = [int]$batNode.FullChargeCapacity 
-                }
-            }
-            Remove-Item $XmlPath -Force -ErrorAction SilentlyContinue
-        }
-    } catch {}
-
-    # --- 2. PENENTUAN KELUARAN & KALKULASI SOH ---
     if ($HasBattery) {
-        # Validasi logis agar Design Capacity tidak bernilai 0 jika Full Charge Capacity ada
-        if ($DesignMwh -eq 0 -and $FullMwh -gt 0) { $DesignMwh = $FullMwh }
-        
-        # Hitung Health SOH
-        if ($DesignMwh -gt 0) {
-            $Health = [int](($FullMwh / $DesignMwh) * 100)
+        # 2. Extract State & Battery Charge Level (%)
+        $BatteryLevel = 0
+        if ($Battery -and $Battery.EstimatedChargeRemaining) {
+            $BatteryLevel = $Battery.EstimatedChargeRemaining
+        } else {
+            $StatusData = Get-CimInstance -Namespace root\wmi -ClassName BatteryStatus -ErrorAction SilentlyContinue
+            if ($StatusData -and $StatusData.RemainingCapacity) {
+                $BatteryLevel = 100
+            }
+        }
+
+        $State = "Unknown"
+        if ($Battery -and $Battery.BatteryStatus) {
+            $StateVal = $Battery.BatteryStatus
+            if ($StateVal -eq 1) { $State = "Discharging" }
+            elseif ($StateVal -eq 2) { $State = "Fully Charged" }
+            elseif ($StateVal -eq 6) { $State = "Charging" }
+            else { $State = "AC Power" }
+        } else {
+            $StatusData = Get-CimInstance -Namespace root\wmi -ClassName BatteryStatus -ErrorAction SilentlyContinue
+            if ($StatusData) {
+                if ($StatusData.PowerOnline) { $State = "Fully Charged" } else { $State = "Discharging" }
+            }
+        }
+
+        # 3. Extract Design Capacity & Full Charge Capacity (mWh)
+        $DesignCapMWh = 0
+        $FullCapMWh = 0
+
+        # Primary Method: powercfg /batteryreport /xml
+        $XmlPath = Join-Path $env:TEMP "cmk_battery_report.xml"
+        try {
+            $null = powercfg /batteryreport /xml /output "$XmlPath" 2>$null
+            if (Test-Path $XmlPath) {
+                [xml]$reportXml = Get-Content $XmlPath -ErrorAction SilentlyContinue
+                $batNode = $reportXml.BatteryReport.Batteries.Battery | Select-Object -First 1
+                if ($batNode) {
+                    if ($batNode.DesignCapacity) { $DesignCapMWh = [long]$batNode.DesignCapacity }
+                    if ($batNode.FullChargeCapacity) { $FullCapMWh = [long]$batNode.FullChargeCapacity }
+                }
+                Remove-Item $XmlPath -Force -ErrorAction SilentlyContinue
+            }
+        } catch {}
+
+        # Fallback Method 1: powercfg /batteryreport /output HTML parse
+        if ($DesignCapMWh -eq 0 -or $FullCapMWh -eq 0) {
+            $HtmlPath = Join-Path $env:TEMP "cmk_battery_report.html"
+            try {
+                $null = powercfg /batteryreport /output "$HtmlPath" 2>$null
+                if (Test-Path $HtmlPath) {
+                    $htmlContent = Get-Content $HtmlPath -Raw -ErrorAction SilentlyContinue
+                    if ($htmlContent -match 'DESIGN CAPACITY\s*</td>\s*<td[^>]*>\s*([0-9,]+)\s*mWh') {
+                        $DesignCapMWh = [long]($Matches[1] -replace ',', '')
+                    }
+                    if ($htmlContent -match 'FULL CHARGE CAPACITY\s*</td>\s*<td[^>]*>\s*([0-9,]+)\s*mWh') {
+                        $FullCapMWh = [long]($Matches[1] -replace ',', '')
+                    }
+                    Remove-Item $HtmlPath -Force -ErrorAction SilentlyContinue
+                }
+            } catch {}
+        }
+
+        # Fallback Method 2: CIM root\wmi (BatteryStaticData & BatteryFullChargedCapacity)
+        if ($DesignCapMWh -eq 0 -or $FullCapMWh -eq 0) {
+            $StaticData = Get-CimInstance -Namespace root\wmi -ClassName BatteryStaticData -ErrorAction SilentlyContinue
+            if ($StaticData -and $StaticData.DesignedCapacity) {
+                $DesignCapMWh = [long]$StaticData.DesignedCapacity
+            }
+            $FullData = Get-CimInstance -Namespace root\wmi -ClassName BatteryFullChargedCapacity -ErrorAction SilentlyContinue
+            if ($FullData -and $FullData.FullChargedCapacity) {
+                $FullCapMWh = [long]$FullData.FullChargedCapacity
+            }
+        }
+
+        # Fallback Method 3: Win32_Battery WMI
+        if ($DesignCapMWh -eq 0 -or $FullCapMWh -eq 0) {
+            if ($Battery) {
+                if ($Battery.DesignCapacity) { $DesignCapMWh = [long]$Battery.DesignCapacity }
+                if ($Battery.FullChargeCapacity) { $FullCapMWh = [long]$Battery.FullChargeCapacity }
+            }
+        }
+
+        # 4. Compute Wh values & Health SOH (%)
+        $DesignWh = [Math]::Round($DesignCapMWh / 1000)
+        $FullWh = [Math]::Round($FullCapMWh / 1000)
+
+        if ($DesignCapMWh -gt 0 -and $FullCapMWh -gt 0) {
+            $Health = [Math]::Floor(($FullCapMWh / $DesignCapMWh) * 100)
+            if ($Health -gt 100) { $Health = 100 }
+        } elseif ($DesignWh -gt 0 -and $FullWh -gt 0) {
+            $Health = [Math]::Floor(($FullWh / $DesignWh) * 100)
             if ($Health -gt 100) { $Health = 100 }
         } else {
-            $Health = 100
+            $Health = 0
         }
 
-        $DesignWh = [Math]::Round($DesignMwh / 1000)
-        $FullWh = [Math]::Round($FullMwh / 1000)
-
-        # Thresholds: OK >= 60%, WARNING <= 40%, CRITICAL <= 20%
+        # 5. Evaluate Thresholds: OK >= 60%, WARNING <= 40%, CRITICAL <= 20%
         $Status = 0
         $StatusTxt = "OK"
         if ($Health -le 20) {
@@ -112,15 +142,13 @@ if ($NeedUpdate) {
             $StatusTxt = "Warning"
         }
 
-        # ASCII Delimiter (|) murni
-        $Output = "$Status `"Health_Battery`" - Status Battery : $State | Design Capacity : $($DesignWh)w/h | Current Capacity : $($FullWh)w/h | Health : $($Health)% | Battery Level : $($BatteryLevel)%"
+        $Output = "$Status `"Health_Battery`" - Status Battery : $State ❘ Design Capacity : $($DesignWh)w/h ❘ Current Capacity : $($FullWh)w/h ❘ Health : $($Health)% ❘ Battery Level : $($BatteryLevel)%"
     } else {
-        # PC Desktop / Virtual Machine / Tanpa Baterai
-        $Output = "0 `"Health_Battery`" - Status Battery : N/A | Device is PC/Desktop, there is no battery."
+        # PC Desktop / No Battery
+        $Output = "0 `"Health_Battery`" - Status Battery : N/A ❘ Device is PC/Desktop, there is no battery."
     }
 
-    # Simpan dengan ASCII murni
-    $Output | Out-File -FilePath $CacheFile -Encoding ascii -Force
+    $Output | Out-File -FilePath $CacheFile -Encoding utf8 -Force
 }
 
 Get-Content $CacheFile -ErrorAction SilentlyContinue
