@@ -12,9 +12,9 @@ if (-not $isAdmin) {
 
 # 2. Inisialisasi Variabel Default & Parsing Argumen Baris Perintah ($args)
 $ServerIP      = ""
-$WebPort       = ""
+$WebPort       = "8080"
 $SiteName      = "cmk"
-$AgentVersion  = "2.5.0p9-1"
+$AgentVersion  = "2.5.0p14-1"
 $GithubUser    = "andin1st"
 $GithubRepo    = "scriptcmk"
 $Branch        = "main"
@@ -39,46 +39,31 @@ if ([string]::IsNullOrWhiteSpace($ServerIP)) {
     Write-Host "`n[MODE INTERAKTIF] Silakan masukkan konfigurasi server Checkmk Anda:" -ForegroundColor Yellow
     
     while ([string]::IsNullOrWhiteSpace($ServerIP)) {
-        $ServerIP = (Read-Host "1. Masukkan Alamat Server Checkmk (IP / Hostname) [Contoh: 192.168.1.100]").Trim()
+        $ServerIP = (Read-Host "1. Masukkan Alamat Server Checkmk [Contoh: 192.168.43.188:8080 atau 192.168.43.188]").Trim()
         if ([string]::IsNullOrWhiteSpace($ServerIP)) {
             Write-Host "   [!] Alamat server tidak boleh kosong!" -ForegroundColor Red
         }
     }
 
-    if ([string]::IsNullOrWhiteSpace($WebPort)) {
-        $inputPort = (Read-Host "2. Masukkan Port Web GUI Checkmk [Default: 8080]").Trim()
-        if (-not [string]::IsNullOrWhiteSpace($inputPort)) {
-            $WebPort = $inputPort
-        } else {
-            $WebPort = "8080"
-        }
-    }
-
-    $inputSite = (Read-Host "3. Masukkan Site ID Checkmk [Default: $SiteName]").Trim()
+    $inputSite = (Read-Host "2. Masukkan Site ID Checkmk [Default: $SiteName]").Trim()
     if (-not [string]::IsNullOrWhiteSpace($inputSite)) {
         $SiteName = $inputSite
     }
 
-    $inputVer = (Read-Host "4. Masukkan Versi Agen Checkmk [Default: $AgentVersion]").Trim()
+    $inputVer = (Read-Host "3. Masukkan Versi Agen Checkmk [Default: $AgentVersion]").Trim()
     if (-not [string]::IsNullOrWhiteSpace($inputVer)) {
         $AgentVersion = $inputVer
     }
 }
 
-# Jika WebPort masih kosong (misal lewat CLI -s 192.168.1.100 tanpa -p)
-if ([string]::IsNullOrWhiteSpace($WebPort)) {
-    if ($ServerIP -like "*:*") {
-        # Jika user memasukkan 192.168.1.100:8080 di ServerIP
-        $parts = $ServerIP -split ':'
-        $HostOnly = $parts[0]
-        $WebPort = $parts[1]
-    } else {
-        $HostOnly = $ServerIP
-        $WebPort = "8080"
-    }
+# Ekstraksi Host dan Port dari ServerIP (jika user memasukkan 192.168.43.188:8080)
+$CleanServer = $ServerIP -replace '^https?://', ''
+if ($CleanServer -like "*:*") {
+    $parts = $CleanServer -split ':'
+    $HostOnly = $parts[0]
+    $WebPort  = $parts[1]
 } else {
-    $CleanHost = $ServerIP -replace '^https?://', ''
-    $HostOnly  = ($CleanHost -split ':')[0]
+    $HostOnly = $CleanServer
 }
 
 # Konstruksi URL Download & GitHub Base
