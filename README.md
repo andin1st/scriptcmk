@@ -61,12 +61,12 @@ curl -fsSL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/insta
 
 #### **A. Mode Interaktif**:
 ```bash
-curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install.sh | bash
+curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install.sh | sudo bash
 ```
 
 #### **B. Mode Instan / Silent (Deployment Massal)**:
 ```bash
-curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install.sh | bash -s -- \
+curl -sSfgL https://raw.githubusercontent.com/andin1st/scriptcmk/main/linux/install.sh | sudo bash -s -- \
   -s 192.168.1.100:8080 \
   -d cmk \
   -v 2.5.0p14-1 \
